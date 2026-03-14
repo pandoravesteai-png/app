@@ -1,0 +1,7 @@
+{
+  "name": "PANDORA AI OFICIAL",
+  "description": "A revolutionary virtual try-on application powered by AI, allowing users to transform their wardrobe and visualize outfits with photorealistic accuracy.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

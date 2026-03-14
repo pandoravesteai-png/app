@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and credit balance",
+      "type": "object",
+      "properties": {
+        "credits": {
+          "type": "integer",
+          "description": "Number of credits available for the user"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the user account was created"
+        },
+        "name": {
+          "type": "string",
+          "description": "User's full name"
+        },
+        "email": {
+          "type": "string",
+          "description": "User's email address"
+        },
+        "lastPlan": {
+          "type": "string",
+          "description": "The last credit plan purchased by the user"
+        }
+      },
+      "required": ["credits", "createdAt", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User documents stored by their unique ID"
+    }
+  }
+}

@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - credits: number (required) - Number of credits available
+    //   - createdAt: string (required) - ISO 8601 timestamp
+    //   - role: string (optional) - User role (admin, user)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "pandoravesteai@gmail.com");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['credits', 'createdAt', 'role', 'email', 'name', 'lastPlan']) &&
+             data.credits is number &&
+             data.createdAt is string &&
+             (!('email' in data) || data.email is string) &&
+             (!('name' in data) || data.name is string) &&
+             (!('lastPlan' in data) || data.lastPlan is string || data.lastPlan == null) &&
+             (!('role' in data) || data.role in ['admin', 'user']);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Allow read if the user is the owner (by UID or email), if the document doesn't exist (to allow checking), or if an admin
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        resource == null ||
+        (resource != null && 'email' in resource.data && request.auth.token.email == resource.data.email) || 
+        isAdmin()
+      );
+      
+      // Allow create if the user is setting their own UID or their own email
+      allow create: if isAuthenticated() && 
+                      (
+                        request.auth.uid == userId || 
+                        (request.resource.data.email == request.auth.token.email)
+                      ) &&
+                      isValidUser(request.resource.data) &&
+                      request.resource.data.credits == 1 &&
+                      (!('role' in request.resource.data) || request.resource.data.role == 'user');
+                      
+      // Allow update if the user is the owner (by UID or email), or if they are setting their own email on an unowned doc
+      allow update: if isAuthenticated() && 
+                      (
+                        request.auth.uid == userId || 
+                        (resource != null && 'email' in resource.data && resource.data.email == request.auth.token.email) || 
+                        (request.resource.data.email == request.auth.token.email) ||
+                        isAdmin()
+                      ) && 
+                      isValidUser(request.resource.data) &&
+                      request.resource.data.createdAt == resource.data.createdAt &&
+                      (isAdmin() || request.resource.data.role == resource.data.role);
+    }
+  }
+}
