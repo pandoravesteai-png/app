@@ -23,7 +23,7 @@ service cloud.firestore {
     }
     
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isAuthenticated() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
 
     function isAdmin() {
@@ -40,12 +40,13 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['credits', 'createdAt', 'role', 'email', 'name', 'lastPlan']) &&
+      return hasOnlyAllowedFields(['credits', 'createdAt', 'role', 'email', 'name', 'lastPlan', 'fcmToken']) &&
              data.credits is number &&
              data.createdAt is string &&
              (!('email' in data) || data.email is string) &&
              (!('name' in data) || data.name is string) &&
              (!('lastPlan' in data) || data.lastPlan is string || data.lastPlan == null) &&
+             (!('fcmToken' in data) || data.fcmToken is string) &&
              (!('role' in data) || data.role in ['admin', 'user']);
     }
 
@@ -56,7 +57,7 @@ service cloud.firestore {
     match /users/{userId} {
       // Allow read if the user is the owner (by UID or email), if the document doesn't exist (to allow checking), or if an admin
       allow read: if isAuthenticated() && (
-        request.auth.uid == userId || 
+        isOwner(userId) || 
         resource == null ||
         (resource != null && 'email' in resource.data && request.auth.token.email == resource.data.email) || 
         isAdmin()
@@ -65,7 +66,7 @@ service cloud.firestore {
       // Allow create if the user is setting their own UID or their own email
       allow create: if isAuthenticated() && 
                       (
-                        request.auth.uid == userId || 
+                        isOwner(userId) || 
                         (request.resource.data.email == request.auth.token.email)
                       ) &&
                       isValidUser(request.resource.data) &&
@@ -75,7 +76,7 @@ service cloud.firestore {
       // Allow update if the user is the owner (by UID or email), or if they are setting their own email on an unowned doc
       allow update: if isAuthenticated() && 
                       (
-                        request.auth.uid == userId || 
+                        isOwner(userId) || 
                         (resource != null && 'email' in resource.data && resource.data.email == request.auth.token.email) || 
                         (request.resource.data.email == request.auth.token.email) ||
                         isAdmin()

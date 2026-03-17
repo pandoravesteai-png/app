@@ -4,11 +4,19 @@ import { Screen, UserState, ClothingType, HistoryItem } from './types';
 import { AppLogo, Button, Input } from './components/UI';
 import { CATEGORIES, HOME_CAROUSEL_1, HOME_CAROUSEL_2 } from './constants';
 import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move } from 'lucide-react';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './services/firebase';
-import { signOut } from 'firebase/auth';
+import { 
+  signOut, 
+  signInWithPopup, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  sendPasswordResetEmail,
+  confirmPasswordReset,
+  GoogleAuthProvider
+} from 'firebase/auth';
 import { generateFashionTip, generateTryOnLook, generate360View } from './services/geminiService';
-import { loginWithGoogle, loginWithEmail, deleteCurrentUser } from './services/firebase';
+import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider } from './services/firebase';
 import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail } from './services/creditsService';
 import { createPixPayment } from './services/paymentService';
 
@@ -411,10 +419,10 @@ const SplashScreen: React.FC<{ onFinish: () => void }> = ({ onFinish }) => {
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center animate-fade-in">
        <div className="flex flex-col items-center w-full px-8">
-          <AppLogo size="lg" showText={true} />
+          <AppLogo size="lg" />
           
           {/* Loading Bar Container */}
-          <div className="w-64 h-1.5 bg-gray-100 rounded-full mt-10 overflow-hidden relative">
+          <div className="w-64 h-1.5 bg-gray-100 rounded-full mt-6 overflow-hidden relative">
             {/* Neon Purple Bar */}
             <div 
               className="h-full bg-purple-600 shadow-[0_0_10px_#9333ea] rounded-full transition-all duration-75 ease-linear relative z-10"
@@ -719,36 +727,89 @@ const LoadingScreen: React.FC<{
 
 const LoginScreen: React.FC<{ 
   onLogin: (email: string, uid: string) => void; 
-  onForgotPassword: () => void;
   onNoRegistration: () => void;
   setUserId: (uid: string) => void;
   setUserState: React.Dispatch<React.SetStateAction<UserState>>;
   setScreen: (screen: Screen) => void;
-}> = ({ onLogin, onForgotPassword, onNoRegistration, setUserId, setUserState, setScreen }) => {
+  setShowSuccessModal: (show: boolean) => void;
+}> = ({ onLogin, onNoRegistration, setUserId, setUserState, setScreen, setShowSuccessModal }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    const { user, isNewUser, error: loginError } = await loginWithGoogle();
-    setIsLoading(false);
-
-    if (loginError) {
-      setError("Erro ao conectar com Google.");
+  const handleEsqueciSenha = async () => {
+    const emailInput = email || '';
+    
+    if (!emailInput || !emailInput.includes('@')) {
+      alert('⚠️ Digite seu email no campo acima primeiro');
       return;
     }
-
-    if (user) {
-      setUserId(user.uid);
-      await saveUserEmail(user.uid, user.email || '');
+    
+    try {
+      const emailLower = emailInput.toLowerCase().trim();
+      await sendPasswordResetEmail(auth, emailLower);
       
-      const credits = await getOrCreateUserCredits(user.uid);
-      setUserState(prev => ({ ...prev, email: user.email || '', credits }));
-      setScreen(Screen.ONBOARDING);
+      setShowSuccessModal(true);
+    } catch (error: any) {
+      console.error('Erro ao enviar email:', error);
+      
+      if (error.code === 'auth/user-not-found') {
+        alert('❌ Email não encontrado.\n\nEste email não está cadastrado.');
+      } else {
+        alert('❌ Erro ao enviar email.\n\nTente novamente.');
+      }
+    }
+  };
 
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      
+      if (!user.email) {
+        alert('Não foi possível obter seu email. Tente novamente.');
+        return;
+      }
+      
+      // USA O EMAIL COMO ID DO DOCUMENTO
+      const userEmail = user.email.toLowerCase().trim();
+      
+      console.log('Login Google - Email:', userEmail);
+      
+      setUserId(userEmail);
+      
+      // Verificar se usuário já existe no Firestore
+      const userRef = doc(db, 'users', userEmail);
+      const userSnap = await getDoc(userRef);
+      let credits = 10;
+      let name = user.displayName || 'Usuário';
+      
+      // Se NÃO existe, criar com créditos iniciais
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          email: userEmail,
+          nome: name,
+          credits: 10,
+          created_at: serverTimestamp()
+        });
+        console.log('Novo usuário criado no Firestore via Google:', userEmail);
+      } else {
+        const userData = userSnap.data();
+        credits = userData.credits ?? 0;
+        name = userData.nome || userData.name || name;
+      }
+      
+      // Atualiza estado
+      setUserState(prev => ({ 
+        ...prev, 
+        email: userEmail,
+        name: name,
+        credits 
+      }));
+      
+      setScreen(Screen.ONBOARDING);
+      
       // Solicita permissões de notificação e instalação PWA
       const requestPermissions = async () => {
         // 1. Permissão de Notificações
@@ -758,7 +819,7 @@ const LoginScreen: React.FC<{
             // Registra o token FCM
             const token = await getMessagingToken();
             if (token) {
-              await saveUserToken(user.uid, token);
+              await saveUserToken(userEmail, token);
             }
           }
         }
@@ -774,38 +835,114 @@ const LoginScreen: React.FC<{
       };
 
       setTimeout(requestPermissions, 2000); // Aguarda 2s após login
+      
+    } catch (error) {
+      console.error('Erro no login Google:', error);
+      alert('Erro ao fazer login com Google. Tente novamente.');
     }
   };
 
-  const handleEmailLogin = async () => {
-    if (!email || !password) {
-        setError("Por favor, preencha email e senha.");
-        return;
+  const handleEmailLogin = async (emailInput: string, passwordInput: string) => {
+    try {
+      const emailLower = emailInput.toLowerCase().trim();
+      setIsLoading(true);
+      setError(null);
+      
+      // Faz login
+      await signInWithEmailAndPassword(auth, emailLower, passwordInput);
+      
+      // Login bem-sucedido
+      setUserId(emailLower);
+      await saveUserEmail(emailLower, emailLower);
+      const credits = await getOrCreateUserCredits(emailLower);
+      
+      setUserState(prev => ({ 
+        ...prev, 
+        email: emailLower,
+        credits 
+      }));
+      
+      setScreen(Screen.ONBOARDING);
+      
+    } catch (error: any) {
+      console.error('Erro no login:', error);
+      
+      if (error.code === 'auth/user-not-found') {
+        setError('Usuário não encontrado. Clique em "Cadastre-se" para criar uma conta.');
+      } else if (error.code === 'auth/wrong-password') {
+        setError('Senha incorreta. Clique em "Esqueceu a senha?" para resetar.');
+      } else if (error.code === 'auth/invalid-credential') {
+        setError('Email ou senha incorretos.');
+      } else {
+        setError('Erro ao fazer login. Tente novamente.');
+      }
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(true);
-    setError(null);
-    const { user, error: loginError } = await loginWithEmail(email, password);
-    setIsLoading(false);
+  };
 
-    if (loginError) {
-      setError(loginError);
+  const handleSignUp = async () => {
+    if (!email || !password) {
+      alert('⚠️ Preencha email e senha');
       return;
     }
-
-    if (user) {
-      onLogin(user.email || email, user.uid);
+    
+    if (password.length < 6) {
+      alert('⚠️ A senha deve ter pelo menos 6 caracteres');
+      return;
     }
-  };
-
-  const handleRegister = () => {
-    window.open('https://pandora-style-ai.lovable.app', '_blank');
+    
+    try {
+      const emailLower = email.toLowerCase().trim();
+      
+      // Cria nova conta
+      await createUserWithEmailAndPassword(auth, emailLower, password);
+      
+      // Envia email de boas-vindas
+      try {
+        await fetch('https://us-central1-pandora-ai-7c070.cloudfunctions.net/enviarEmailBoasVindas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: emailLower })
+        });
+        console.log('✅ Email de boas-vindas enviado');
+      } catch (emailError) {
+        console.log('⚠️ Erro ao enviar email:', emailError);
+      }
+      
+      // Cria documento no Firestore
+      setUserId(emailLower);
+      await saveUserEmail(emailLower, emailLower);
+      const credits = await getOrCreateUserCredits(emailLower);
+      
+      setUserState(prev => ({ 
+        ...prev, 
+        email: emailLower,
+        credits 
+      }));
+      
+      alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVerifique seu email para mais informações.');
+      setScreen(Screen.ONBOARDING);
+      
+    } catch (error: any) {
+      console.error('Erro ao cadastrar:', error);
+      
+      if (error.code === 'auth/email-already-in-use') {
+        alert('❌ Este email já está cadastrado.\n\nUse "Entrar na Plataforma" para fazer login.\n\nOu clique em "Esqueceu a senha?" para recuperar.');
+      } else if (error.code === 'auth/invalid-email') {
+        alert('❌ Email inválido.\n\nDigite um email válido.');
+      } else if (error.code === 'auth/weak-password') {
+        alert('❌ Senha muito fraca.\n\nUse pelo menos 6 caracteres.');
+      } else {
+        alert('❌ Erro ao criar conta.\n\nTente novamente em alguns instantes.');
+      }
+    }
   };
 
   return (
     <div className="relative w-full h-full min-h-screen flex flex-col items-center justify-center overflow-y-auto bg-white">
       <div className="relative z-10 w-full max-w-md px-8 animate-fade-in flex flex-col items-center">
-        <div className="mb-6 w-full flex justify-center">
+        <div className="mb-4 w-full flex justify-center">
           <AppLogo size="md" />
         </div>
 
@@ -830,115 +967,71 @@ const LoginScreen: React.FC<{
         </div>
 
         <div className="w-full mt-8 space-y-4">
-          <Button onClick={handleEmailLogin} disabled={isLoading}>
-            {isLoading ? 'Entrando...' : 'Entrar na Plataforma'}
+          <Button 
+            onClick={() => handleEmailLogin(email, password)} 
+            isLoading={isLoading}
+            className="w-full py-4 transition-all transform active:scale-95"
+          >
+            Entrar na Plataforma
           </Button>
 
-          <button 
-            onClick={handleGoogleLogin}
-            disabled={isLoading}
-            className="w-full py-4 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path
-                fill="currentColor"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="currentColor"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="currentColor"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-              />
-              <path
-                fill="currentColor"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-              />
-            </svg>
-            Entrar com Google
-          </button>
-          
-          <div className="flex justify-between items-center w-full pt-2">
+          <div className="flex flex-col items-center gap-4 mt-4">
             <button 
-              onClick={onForgotPassword}
-              className="text-purple-600 text-sm font-medium hover:text-purple-800 transition-colors"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="w-full py-4 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              Esqueceu a senha?
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path
+                  fill="currentColor"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                />
+              </svg>
+              Entrar com Google
             </button>
-            <button 
-              onClick={handleRegister}
-              className="text-purple-600 text-sm font-medium hover:text-purple-800 transition-colors"
-            >
-              Cadastre-se
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
-const ForgotPasswordScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
-  const [email, setEmail] = useState('');
-  const [isSubmitted, setIsSubmitted] = useState(false);
-
-  const handleSubmit = () => {
-    if (email) {
-      setIsSubmitted(true);
-    }
-  };
-
-  return (
-    <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative overflow-y-auto">
-      <div className="px-6 pt-6 pb-2">
-        <button 
-          onClick={onBack}
-          className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-        >
-          <ArrowLeft size={24} />
-        </button>
-      </div>
-
-      <div className="flex-1 flex flex-col px-8 pt-4">
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Recuperar Senha</h2>
-          <p className="text-gray-500">
-            Digite seu email para receber as instruções de recuperação de senha.
-          </p>
-        </div>
-
-        {!isSubmitted ? (
-          <div className="space-y-6">
-            <Input 
-              icon={<Mail size={20} />} 
-              type="email" 
-              placeholder="seu@email.com" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              label="Email Cadastrado"
-            />
-            <Button onClick={handleSubmit}>
-              Enviar Instruções
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center text-center animate-fade-in space-y-6 mt-8">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-600 mb-2">
-              <Check size={32} />
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Email Enviado!</h3>
-              <p className="text-gray-500">
-                Verifique sua caixa de entrada em <strong>{email}</strong> para redefinir sua senha.
+            <div className="flex flex-col items-center gap-2">
+              <a 
+                onClick={() => setScreen(Screen.RECUPERAR_SENHA)}
+                style={{
+                  cursor: 'pointer',
+                  color: '#8B2CF5',
+                  textDecoration: 'none',
+                  fontSize: '15px'
+                }}
+              >
+                Esqueceu a senha?
+              </a>
+              
+              <p className="text-sm text-gray-500">
+                Não tem uma conta?{' '}
+                <a 
+                  onClick={() => setScreen(Screen.CADASTRO)}
+                  style={{
+                    cursor: 'pointer', 
+                    color: '#8B2CF5', 
+                    textDecoration: 'none',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cadastre-se
+                </a>
               </p>
             </div>
-            <Button variant="outline" onClick={onBack}>
-              Voltar ao Login
-            </Button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -996,7 +1089,10 @@ const ProfileScreen: React.FC<{
 
     return (
         <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative overflow-y-auto">
-            {/* History Detail Modal */}
+            {/* Header removido - agora no MainLayout */}
+            <div className="text-center px-6 py-4 bg-white z-20 shadow-sm shrink-0">
+                <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Meu Perfil e Créditos</h2>
+            </div>
             {selectedHistoryItem && (
                 <div className="fixed inset-0 z-50 bg-black/95 flex flex-col animate-fade-in p-6 overflow-y-auto">
                     <div className="flex justify-between items-center mb-6">
@@ -1265,8 +1361,8 @@ const ProfileScreen: React.FC<{
                     {/* Botão Recarregar */}
                     <button
                       onClick={() => {
-                        // Abre o link direto do Abacate Pay
-                        window.open('https://pay.abacatepay.com/pandora-ai', '_blank');
+                        // Abre o link direto do checkout
+                        window.open('https://checkout.pandoravesteai.com/', '_blank');
                       }}
                       style={{
                         width: '100%',
@@ -1508,16 +1604,8 @@ const ProfileScreen: React.FC<{
 const FAQScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   return (
     <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative overflow-y-auto">
-      <div className="px-6 pt-6 pb-2">
-        <button 
-          onClick={onBack}
-          className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-        >
-          <ArrowLeft size={24} />
-        </button>
-      </div>
-
-      <div className="flex-1 flex flex-col px-6 pt-4 pb-8 overflow-y-auto no-scrollbar">
+      {/* Header removido - agora no MainLayout */}
+      <div className="flex-1 flex flex-col px-6 pt-6 pb-8 overflow-y-auto no-scrollbar">
         <h2 className="text-2xl font-bold text-gray-900 mb-6">Perguntas Frequentes</h2>
         
         <div className="space-y-3">
@@ -1586,19 +1674,309 @@ const FAQScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 };
 
 
+// --- Credit Alert System ---
+const getBannerConfig = (credits: number) => {
+  if (credits === 0) {
+    return {
+      level: 6,
+      background: 'linear-gradient(135deg, #1a1a2e, #3d0066, #1a1a2e, #3d0066)',
+      backgroundSize: '400% 400%',
+      icon: '🚫',
+      title: 'Seus créditos acabaram',
+      text: 'Você está perdendo looks incríveis agora. Cada dia sem o Pandora AI é um dia com o guarda-roupa errado.',
+      buttonText: '✨ Quero meus looks agora',
+      buttonPulse: 'animate-pulse-strong',
+      shadow: 'shadow-[0_10px_30px_rgba(0,0,0,0.5)]',
+      buttonBorder: 'border-[#FFD700]',
+      // Animations
+      bgAnimation: 'level6Gradient 1.5s ease infinite',
+      iconAnimation: 'iconSpinDramatic 2s ease-in-out infinite',
+      titleAnimation: 'pulse 1s ease-in-out infinite',
+      shadowAnimation: 'level6Pulse 1s ease-in-out infinite, level6Shake 1.5s ease-in-out infinite, level6NeonBorder 1s ease-in-out infinite',
+      shimmerDuration: 1.5,
+      buttonAnimation: 'buttonGlow 0.8s ease-in-out infinite',
+      buttonBg: 'linear-gradient(135deg, #FFD700, #FFA500)',
+      containerBorder: '2px solid rgba(138, 43, 226, 0.5)'
+    };
+  }
+  if (credits <= 10) {
+    return {
+      level: 5,
+      background: 'linear-gradient(135deg, #DC143C, #8B0000, #DC143C)',
+      backgroundSize: '200% 200%',
+      icon: '🔥',
+      title: 'Só 10 créditos restantes!',
+      text: 'Não deixe a inspiração parar na hora errada. Recarregue antes que acabe!',
+      buttonText: '🔥 Recarregar agora',
+      buttonPulse: 'animate-pulse-soft',
+      shadow: 'shadow-[0_8px_25px_rgba(220,20,60,0.4)]',
+      buttonBorder: 'border-purple-500',
+      // Animations
+      bgAnimation: 'level5Gradient 2s ease infinite',
+      iconAnimation: 'pulse 1s ease-in-out infinite, iconSpin 2s ease-in-out infinite',
+      titleAnimation: 'pulse 1.2s ease-in-out infinite',
+      shadowAnimation: 'level5Pulse 1.2s ease-in-out infinite, level5Shake 2s ease-in-out infinite, level5NeonBorder 1.2s ease-in-out infinite',
+      shimmerDuration: 1.5,
+      buttonAnimation: 'buttonGlow 1s ease-in-out infinite',
+      buttonBg: 'linear-gradient(135deg, #FF4500, #DC143C)',
+      containerBorder: '2px solid rgba(220, 20, 60, 0.5)'
+    };
+  }
+  if (credits <= 20) {
+    return {
+      level: 4,
+      background: 'linear-gradient(135deg, #FF7F50, #FF6347, #FF7F50)',
+      backgroundSize: '200% 200%',
+      icon: '🔥',
+      title: 'Apenas 20 créditos!',
+      text: 'Está acabando! Garanta mais créditos antes que seja tarde demais.',
+      buttonText: '🔥 Recarregar agora',
+      shadow: 'shadow-[0_6px_20px_rgba(255,127,80,0.3)]',
+      buttonBorder: 'border-purple-500',
+      // Animations
+      bgAnimation: 'level4Gradient 2.5s ease infinite',
+      iconAnimation: 'pulse 1.5s ease-in-out infinite, iconSpin 3s ease-in-out infinite',
+      titleAnimation: 'pulse 1.5s ease-in-out infinite',
+      shadowAnimation: 'level4Pulse 1.5s ease-in-out infinite, level4Shake 3s ease-in-out infinite',
+      shimmerDuration: 2,
+      buttonAnimation: 'buttonGlow 1.5s ease-in-out infinite',
+      containerBorder: '2px solid rgba(255, 99, 71, 0.5)'
+    };
+  }
+  if (credits <= 30) {
+    return {
+      level: 3,
+      background: 'linear-gradient(135deg, #FF9F0A, #FF8C00, #FF9F0A)',
+      backgroundSize: '200% 200%',
+      icon: '⚡',
+      title: '30 créditos restantes',
+      text: 'Está na metade! Recarregue agora e continue se reinventando todo dia.',
+      buttonText: '+ Recarregar agora',
+      shadow: 'shadow-[0_4px_15px_rgba(255,159,10,0.2)]',
+      buttonBorder: 'border-purple-500',
+      // Animations
+      bgAnimation: 'level3Gradient 3s ease infinite',
+      iconAnimation: 'pulse 2s ease-in-out infinite, iconBounce 2s ease-in-out infinite',
+      titleAnimation: 'pulse 2s ease-in-out infinite',
+      shadowAnimation: 'level3Pulse 2s ease-in-out infinite',
+      shimmerDuration: 3,
+      buttonAnimation: 'buttonGlow 2s ease-in-out infinite',
+      containerBorder: '2px solid rgba(255, 159, 10, 0.3)'
+    };
+  }
+  if (credits <= 40) {
+    return {
+      level: 2,
+      background: 'linear-gradient(135deg, #FFD93D, #FFA500, #FFD93D)',
+      backgroundSize: '200% 200%',
+      icon: '⚡',
+      title: '40 créditos restantes',
+      text: 'Está indo bem! Garanta mais créditos e continue explorando novos looks.',
+      buttonText: '+ Recarregar',
+      shadow: 'shadow-[0_4px_12px_rgba(255,217,61,0.15)]',
+      buttonBorder: 'border-purple-500',
+      // Animations
+      bgAnimation: 'level2Gradient 4s ease infinite',
+      iconAnimation: 'pulse 2.5s ease-in-out infinite',
+      titleAnimation: 'pulse 2.5s ease-in-out infinite',
+      shadowAnimation: 'level2Shadow 2.5s ease-in-out infinite',
+      shimmerDuration: 3.5,
+      buttonAnimation: 'buttonGlow 2.5s ease-in-out infinite'
+    };
+  }
+  if (credits <= 50) {
+    return {
+      level: 1,
+      background: 'linear-gradient(135deg, #FFE17B, #FFCD3C, #FFE17B)',
+      backgroundSize: '200% 200%',
+      icon: '✨',
+      title: '50 créditos restantes',
+      text: 'Você ainda tem créditos, mas considere recarregar para não perder o ritmo!',
+      buttonText: '+ Recarregar',
+      shadow: 'shadow-[0_4px_10px_rgba(255,225,123,0.1)]',
+      buttonBorder: 'border-purple-500',
+      // Animations
+      bgAnimation: 'level1Gradient 5s ease infinite',
+      iconAnimation: 'pulse 3s ease-in-out infinite',
+      titleAnimation: 'pulse 3s ease-in-out infinite',
+      shadowAnimation: 'level1Shadow 3s ease-in-out infinite',
+      shimmerDuration: 4,
+      buttonAnimation: 'buttonGlow 3s ease-in-out infinite'
+    };
+  }
+  return null;
+};
+
+const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }> = ({ credits, onOpenCredits }) => {
+  const config = getBannerConfig(credits);
+  if (!config) return null;
+
+  return (
+    <div 
+      className={`w-full my-4 px-6 py-5 flex flex-col sm:flex-row items-center gap-4 transition-all duration-500 relative overflow-hidden ${config.shadow}`}
+      style={{ 
+        background: config.background,
+        backgroundSize: '200% 200%',
+        animation: `${config.bgAnimation}, slideInDownDrammatic 0.5s ease-out, ${config.shadowAnimation}`,
+        willChange: 'transform, background-position, box-shadow'
+      }}
+    >
+      {/* Shimmer effect */}
+      <div 
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
+          animation: `shimmer ${config.shimmerDuration} infinite`,
+        }}
+      />
+
+      <div 
+        className="text-4xl sm:text-3xl flex-shrink-0 z-10"
+        style={{ animation: config.iconAnimation }}
+      >
+        {config.icon}
+      </div>
+      
+      <div className="flex-1 text-center sm:text-left z-10">
+        <h4 
+          className="text-white font-bold text-lg leading-tight mb-1"
+          style={{ animation: config.titleAnimation }}
+        >
+          {config.title}
+        </h4>
+        <p className="text-white/90 text-xs leading-relaxed">
+          {config.text}
+        </p>
+      </div>
+
+      <button 
+        onClick={onOpenCredits}
+        className={`
+          px-5 py-2.5 bg-white text-purple-700 font-bold text-sm rounded-full border-2 
+          transition-all hover:scale-105 active:scale-95 whitespace-nowrap z-10
+          ${config.buttonBorder}
+        `}
+        style={{
+          animation: 'buttonPulseGlow 1.5s infinite'
+        }}
+      >
+        {config.buttonText}
+      </button>
+    </div>
+  );
+};
+
+const MainLayout: React.FC<{
+  children: React.ReactNode;
+  credits: number;
+  onOpenCredits: () => void;
+  onOpenFAQ: () => void;
+  showBanner?: boolean;
+  onBack?: () => void;
+}> = ({ children, credits, onOpenCredits, onOpenFAQ, showBanner = true, onBack }) => {
+  const [showCreditsInfo, setShowCreditsInfo] = useState(false);
+
+  const badgeConfig = (() => {
+    if (credits <= 10) {
+      return {
+        bg: 'bg-red-50',
+        border: 'border-red-200',
+        text: 'text-red-600',
+        icon: <AlertTriangle size={12} />
+      };
+    }
+    if (credits <= 20) {
+      return {
+        bg: 'bg-orange-50',
+        border: 'border-orange-200',
+        text: 'text-orange-600',
+        icon: <Zap size={12} />
+      };
+    }
+    return {
+      bg: 'bg-purple-50',
+      border: 'border-purple-100',
+      text: 'text-purple-700',
+      icon: null
+    };
+  })();
+
+  return (
+    <div className="w-full h-screen bg-white flex flex-col overflow-hidden animate-fade-in font-sans relative">
+      {showCreditsInfo && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl relative text-center">
+            <button onClick={() => setShowCreditsInfo(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+              <X size={24} />
+            </button>
+            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4 text-purple-600">
+              <Zap size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Sistema de Créditos</h3>
+            <p className="text-gray-600 text-sm mb-6">
+              Cada geração de look consome 1 crédito. Você pode recarregar seus créditos a qualquer momento para continuar transformando seu estilo!
+            </p>
+            <Button onClick={() => { setShowCreditsInfo(false); onOpenCredits(); }}>
+              Gerenciar Créditos
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="w-full h-16 bg-white flex items-center justify-between px-6 sticky top-0 z-50 border-b border-gray-50/50 backdrop-blur-sm bg-white/95">
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors">
+              <ArrowLeft size={20} />
+            </button>
+          )}
+          <div className="flex items-center gap-2.5">
+            <img 
+              src="https://i.postimg.cc/G2DYHjrv/P-(1).png" 
+              alt="Logo" 
+              className="w-7 h-7 object-contain" 
+            />
+            <span className="text-lg font-semibold text-[#2E0249] tracking-tight font-['Inter']">
+              Pandora AI
+            </span>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <div 
+            onClick={() => setShowCreditsInfo(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border cursor-pointer transition-colors ${badgeConfig.bg} ${badgeConfig.border} ${badgeConfig.text}`}
+          >
+            <span className="text-xs font-bold">{credits} Créditos</span>
+            {badgeConfig.icon}
+          </div>
+          <button 
+            onClick={onOpenCredits}
+            className="w-8 h-8 rounded-full bg-[#6A00F4] text-white flex items-center justify-center shadow-md hover:bg-[#5800cc] transition-colors active:scale-95"
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto no-scrollbar">
+        {showBanner && <CreditAlertBanner credits={credits} onOpenCredits={onOpenCredits} />}
+        {children}
+      </div>
+    </div>
+  );
+};
+
 const HomeScreen: React.FC<{ 
     onUpload: (url: string) => void; 
     onContinue: () => void;
     uploadedImage?: string | null;
     userName?: string;
-    credits: number;
-    onOpenCredits: () => void;
     onOpenFAQ: () => void;
-}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', credits, onOpenCredits, onOpenFAQ }) => {
+}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
-  const [showCreditsInfo, setShowCreditsInfo] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -1634,11 +2012,8 @@ const HomeScreen: React.FC<{
     }
   };
 
-  const isLowCredits = credits <= 2;
-
   return (
-    <div className="w-full h-screen bg-white flex flex-col overflow-y-auto animate-fade-in font-sans relative">
-      
+    <>
       {/* Modals */}
       {showPhotoGuide && (
         <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 animate-fade-in">
@@ -1677,118 +2052,7 @@ const HomeScreen: React.FC<{
         </div>
       )}
 
-      {showCreditsInfo && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl relative text-center">
-            <button onClick={() => setShowCreditsInfo(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-              <X size={24} />
-            </button>
-            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4 text-purple-600">
-              <Zap size={32} />
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Sistema de Créditos</h3>
-            <p className="text-gray-600 text-sm mb-6">
-              Cada geração de look consome 1 crédito. Você pode recarregar seus créditos a qualquer momento para continuar transformando seu estilo!
-            </p>
-            <Button onClick={() => { setShowCreditsInfo(false); onOpenCredits(); }}>
-              Gerenciar Créditos
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="w-full h-16 bg-white flex items-center justify-between px-6 sticky top-0 z-50 border-b border-gray-50/50 backdrop-blur-sm bg-white/95">
-        <div className="flex items-center gap-2.5">
-          <img 
-            src="https://i.postimg.cc/G2DYHjrv/P-(1).png" 
-            alt="Logo" 
-            className="w-7 h-7 object-contain" 
-          />
-          <span className="text-lg font-semibold text-[#2E0249] tracking-tight font-['Inter']">
-            Pandora AI
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <div 
-            onClick={() => setShowCreditsInfo(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border cursor-pointer transition-colors ${isLowCredits ? 'bg-red-50 border-red-200 text-red-600' : 'bg-purple-50 border-purple-100 text-purple-700'}`}
-          >
-            <span className="text-xs font-bold">{credits} Créditos</span>
-            {isLowCredits && <AlertTriangle size={12} />}
-          </div>
-          <button 
-            onClick={onOpenCredits}
-            className="w-8 h-8 rounded-full bg-[#6A00F4] text-white flex items-center justify-center shadow-md hover:bg-[#5800cc] transition-colors active:scale-95"
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-      </div>
-
       <div className="flex-1 overflow-y-auto no-scrollbar pb-6 space-y-6">
-        {credits <= 5 && (() => {
-          let config = null;
-          
-          if (credits === 0) {
-            config = {
-              gradient: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-              emoji: '🚫',
-              title: 'Seus créditos acabaram',
-              subtitle: 'Você está perdendo looks incríveis agora. Cada dia sem o Pandora AI é um dia com o guarda-roupa errado.',
-              btn: '✨ Quero meus looks agora',
-              pulse: true,
-            };
-          } else if (credits <= 2) {
-            config = {
-              gradient: 'linear-gradient(135deg, #c94b4b 0%, #4b134f 100%)',
-              emoji: '🔥',
-              title: `Só ${credits} crédito${credits > 1 ? 's' : ''} restante${credits > 1 ? 's' : ''}!`,
-              subtitle: 'Não deixe a inspiração parar na hora errada. Recarregue antes que acabe!',
-              btn: '🛍️ Recarregar agora',
-              pulse: true,
-            };
-          } else {
-            config = {
-              gradient: 'linear-gradient(135deg, #f7971e 0%, #ffd200 100%)',
-              emoji: '⚡',
-              title: `${credits} créditos restantes`,
-              subtitle: 'Está acabando! Garanta mais créditos e continue se reinventando todo dia.',
-              btn: '+ Recarregar',
-              pulse: false,
-            };
-          }
-
-          return (
-            <div
-              onClick={onOpenCredits}
-              className="mx-6 mt-4 p-4 rounded-2xl shadow-lg cursor-pointer flex flex-col sm:flex-row items-center gap-4 sm:justify-between transition-all active:scale-[0.98]"
-              style={{
-                background: config.gradient,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                animation: config.pulse ? 'pulse 1.5s infinite' : 'none',
-              }}>
-              <div className="flex items-center gap-4 w-full sm:w-auto">
-                <span className="text-3xl shrink-0">{config.emoji}</span>
-                <div className="flex-1">
-                  <p className="text-white font-bold text-base sm:text-lg leading-tight">
-                    {config.title}
-                  </p>
-                  <p className="text-white/90 text-xs sm:text-sm mt-1 leading-relaxed">
-                    {config.subtitle}
-                  </p>
-                </div>
-              </div>
-              <button
-                className="w-full sm:w-auto bg-white text-[#9333ea] px-4 py-2 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap shadow-sm"
-              >
-                {config.btn}
-              </button>
-            </div>
-          );
-        })()}
-
         <div className="px-6 mt-4">
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">
             Olá, {userName}!
@@ -1929,7 +2193,7 @@ const HomeScreen: React.FC<{
           <p className="opacity-50">Versão do Aplicativo: Versão 1.0.0 (Build 20260226)</p>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 
@@ -1944,19 +2208,8 @@ const CategoryScreen: React.FC<{ onSelect: (id: string) => void; onBack: () => v
 
   return (
     <div className="w-full h-full bg-gray-50 flex flex-col animate-fade-in overflow-hidden relative">
-      <div className="pt-12 px-6 pb-6 bg-white z-20 shadow-sm shrink-0 flex flex-col items-center relative">
-        <button 
-           onClick={onBack}
-           className="absolute top-8 left-6 p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-        >
-           <ArrowLeft size={24} />
-        </button>
-        <div className="mb-4 transform scale-125"> 
-            <img src="https://i.postimg.cc/G2DYHjrv/P-(1).png" alt="Logo" className="w-14 h-14 object-contain" />
-        </div>
-        <div className="text-center px-4">
-            <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Escolha o que deseja experimentar</h2>
-        </div>
+      <div className="text-center px-6 py-4 bg-white z-20 shadow-sm shrink-0">
+          <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Escolha o que deseja experimentar</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-4 pb-32">
@@ -2044,13 +2297,9 @@ const FinalizeScreen: React.FC<{
 
   return (
     <div className="w-full h-full bg-white flex flex-col relative animate-slide-up overflow-hidden">
-      <div className="px-6 pt-6 pb-2 shrink-0">
-        <button 
-          onClick={onBack}
-          className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-        >
-          <ArrowLeft size={24} />
-        </button>
+      <div className="text-center px-6 py-4 bg-white z-20 shadow-sm shrink-0">
+          <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Quase lá!</h2>
+          <p className="text-gray-500 text-sm">Confira os detalhes antes de gerar</p>
       </div>
 
       <div className="flex-1 px-6 flex flex-col pt-4 overflow-y-auto no-scrollbar">
@@ -2150,17 +2399,8 @@ const View360Screen: React.FC<{
 
   return (
     <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up pb-8 relative overflow-y-auto">
-       {/* Header with Back Button */}
-       <div className="px-6 pt-6 pb-2">
-            <button 
-                onClick={onBack}
-                className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-            >
-                <ArrowLeft size={24} />
-            </button>
-       </div>
-
-       <div className="px-6 pb-4 text-center">
+       {/* Header removido - agora no MainLayout */}
+       <div className="px-6 pb-4 text-center pt-6">
         <div className="inline-flex items-center gap-2 bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-purple-100">
            <Rotate3d size={14} /> MODO 360°
         </div>
@@ -2256,17 +2496,9 @@ const Result360Screen: React.FC<{
 
    return (
      <div className="w-full h-full min-h-screen bg-white flex flex-col animate-fade-in overflow-y-auto">
-        {/* Header Fixed */}
-        <div className="px-6 pt-6 pb-4 bg-white z-10 flex items-center gap-4 shadow-sm shrink-0">
-          <button 
-             onClick={onBack}
-             className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-          >
-             <ArrowLeft size={24} />
-          </button>
-          <div className="flex-1 text-center pr-8">
+        {/* Header removido - agora no MainLayout */}
+        <div className="px-6 pt-6 pb-4 bg-white z-10 text-center shadow-sm shrink-0">
              <h1 className="text-xl font-bold text-gray-900 leading-tight">Look 360°</h1>
-          </div>
         </div>
 
         {/* Scrollable Content */}
@@ -2481,14 +2713,8 @@ const ResultScreen: React.FC<{
         </div>
       )}
 
-      {/* Header */}
+      {/* Header removido - agora no MainLayout */}
       <div className="px-6 pt-8 pb-4 text-center flex-shrink-0 bg-white z-10 relative">
-        <button 
-            onClick={onBack}
-            className="absolute top-8 left-6 p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-        >
-            <ArrowLeft size={24} />
-        </button>
         <h1 className="text-2xl font-bold text-[#6A00F4] leading-tight">
            Resultado Incrível!
         </h1>
@@ -2610,6 +2836,164 @@ const ResultScreen: React.FC<{
   );
 };
 
+// --- Cadastro Screen ---
+const CadastroScreen: React.FC<{
+  onBack: () => void;
+  onCriarConta: () => void;
+  onGoogleLogin: () => void;
+  nome: string;
+  setNome: (val: string) => void;
+  email: string;
+  setEmail: (val: string) => void;
+  senha: string;
+  setSenha: (val: string) => void;
+  confirmarSenha: string;
+  setConfirmarSenha: (val: string) => void;
+  isLoading: boolean;
+}> = ({ 
+  onBack, 
+  onCriarConta, 
+  onGoogleLogin, 
+  nome,
+  setNome,
+  email, 
+  setEmail, 
+  senha, 
+  setSenha, 
+  confirmarSenha, 
+  setConfirmarSenha,
+  isLoading
+}) => {
+  const senhasCoincidem = senha === confirmarSenha && senha.length > 0;
+  const isFormValid = email.includes('@') && senha.length >= 6 && senhasCoincidem && nome.length > 0;
+
+  return (
+    <div className="relative w-full h-full min-h-screen flex flex-col items-center justify-start overflow-y-auto bg-white">
+      {/* Background Gradient */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#6A00F4]/5 via-white to-[#ec4899]/5 z-0" />
+      
+      <div className="relative z-10 w-full max-w-md px-8 pt-[15vh] pb-10 animate-fade-in flex flex-col items-center">
+        <button 
+          onClick={onBack}
+          className="absolute top-6 left-4 p-2 rounded-full hover:bg-purple-50 text-[#8B2CF5] transition-colors"
+        >
+          <ArrowLeft size={24} />
+        </button>
+
+        <div className="mb-2 w-full flex flex-col items-center transform scale-75 origin-top">
+          <AppLogo size="md" hideSlogan={true} />
+          <h2 className="text-5xl font-mono font-black text-[#8B2CF5] mt-5 uppercase tracking-tighter">Criar Conta</h2>
+        </div>
+
+        <div className="w-full space-y-2">
+          <Input 
+            icon={<Zap size={20} />} 
+            type="text" 
+            placeholder="Seu nome completo" 
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            label="Nome"
+          />
+          <Input 
+            icon={<Mail size={20} />} 
+            type="email" 
+            placeholder="seu@email.com" 
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            label="Email"
+          />
+          <Input 
+            icon={<Lock size={20} />} 
+            type="password" 
+            placeholder="Mínimo 6 caracteres" 
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            label="Senha"
+          />
+          <div className="relative">
+            <Input 
+              icon={<ShieldCheck size={20} />} 
+              type="password" 
+              placeholder="Confirme sua senha" 
+              value={confirmarSenha}
+              onChange={(e) => setConfirmarSenha(e.target.value)}
+              label="Confirmar Senha"
+            />
+            {confirmarSenha.length > 0 && (
+              <div className="absolute right-4 top-[38px]">
+                {senhasCoincidem ? (
+                  <Check size={18} className="text-green-500" />
+                ) : (
+                  <X size={18} className="text-red-500" />
+                )}
+              </div>
+            )}
+          </div>
+          
+          {confirmarSenha.length > 0 && !senhasCoincidem && (
+            <p className="text-red-500 text-[10px] font-medium ml-1">As senhas não coincidem</p>
+          )}
+        </div>
+
+        <div className="w-full mt-4 space-y-3">
+          <Button 
+            onClick={onCriarConta} 
+            isLoading={isLoading}
+            disabled={!isFormValid || isLoading}
+            className={`w-full py-6 text-xl transition-all transform active:scale-95 ${!isFormValid ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
+          >
+            Criar Minha Conta
+          </Button>
+
+          <div className="flex items-center gap-4 py-2">
+            <div className="h-[1px] flex-1 bg-gray-200"></div>
+            <span className="text-xs text-gray-400 font-bold uppercase tracking-widest">ou</span>
+            <div className="h-[1px] flex-1 bg-gray-200"></div>
+          </div>
+
+          <button 
+            onClick={onGoogleLogin}
+            disabled={isLoading}
+            className="w-full py-3 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <path
+                fill="currentColor"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+              />
+              <path
+                fill="currentColor"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+              />
+              <path
+                fill="currentColor"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+              />
+              <path
+                fill="currentColor"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+              />
+            </svg>
+            Continuar com Google
+          </button>
+
+          <div className="text-center pt-4">
+            <p className="text-sm text-gray-500">
+              Já tem uma conta?{' '}
+              <a 
+                onClick={onBack}
+                className="cursor-pointer text-[#8B2CF5] font-bold hover:underline"
+              >
+                Fazer login
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2625,10 +3009,35 @@ const App: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    // Detecta se a URL tem parâmetros de reset de senha
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    const code = urlParams.get('oobCode');
+    
+    if (mode === 'resetPassword' && code) {
+      setOobCode(code);
+      setScreen(Screen.REDEFINIR_SENHA);
+    }
+  }, []);
+
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
   const [userId, setUserId] = useState<string>('');
+  const [email, setEmail] = useState('');
+
+  // States para a tela de cadastro
+  const [cadastroNome, setCadastroNome] = useState('');
+  const [cadastroEmail, setCadastroEmail] = useState('');
+  const [cadastroSenha, setCadastroSenha] = useState('');
+  const [cadastroConfirmarSenha, setCadastroConfirmarSenha] = useState('');
+  const [isCadastroLoading, setIsCadastroLoading] = useState(false);
+  const [emailRecuperacao, setEmailRecuperacao] = useState('');
+  const [oobCode, setOobCode] = useState('');
+  const [novaSenhaRedefinir, setNovaSenhaRedefinir] = useState('');
+  const [confirmarNovaSenhaRedefinir, setConfirmarNovaSenhaRedefinir] = useState('');
 
   const [userState, setUserState] = useState<UserState>({
     email: '',
@@ -2696,28 +3105,86 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleSalvarNovaSenha = async () => {
+    if (!novaSenhaRedefinir || novaSenhaRedefinir.length < 6) {
+      alert('⚠️ A senha deve ter pelo menos 6 caracteres');
+      return;
+    }
+    
+    if (novaSenhaRedefinir !== confirmarNovaSenhaRedefinir) {
+      alert('⚠️ As senhas não coincidem');
+      return;
+    }
+    
+    try {
+      // Confirma a redefinição usando o código da URL
+      await confirmPasswordReset(auth, oobCode, novaSenhaRedefinir);
+      
+      alert('✅ Senha alterada com sucesso!\n\nVocê já pode fazer login com sua nova senha.');
+      
+      // Limpa campos
+      setNovaSenhaRedefinir('');
+      setConfirmarNovaSenhaRedefinir('');
+      setOobCode('');
+      
+      // Limpa URL
+      window.history.replaceState({}, document.title, '/');
+      
+      // Volta para login
+      setScreen(Screen.LOGIN);
+      
+    } catch (error: any) {
+      console.error('Erro ao redefinir senha:', error);
+      
+      if (error.code === 'auth/invalid-action-code') {
+        alert('❌ Link expirado ou já foi usado.\n\nSolicite um novo link de recuperação.');
+        window.history.replaceState({}, document.title, '/');
+        setScreen(Screen.LOGIN);
+      } else if (error.code === 'auth/weak-password') {
+        alert('❌ Senha muito fraca.\n\nUse pelo menos 6 caracteres.');
+      } else {
+        alert('❌ Erro ao salvar nova senha.\n\nTente novamente.');
+      }
+    }
+  };
+
   const handleSplashFinish = () => {
     setScreen(Screen.LOGIN);
   };
 
-  const handleLogin = async (email: string, uid: string) => {
-    setUserId(uid);
-    
-    await saveUserEmail(uid, email);
+  const handleLogin = async (email: string, userIdFromLogin: string) => {
+    const userEmail = email.toLowerCase().trim();
+    setUserId(userEmail);
     
     try {
-      const data = await getDoc(doc(db, 'users', uid));
-      const userData = data.exists() ? data.data() : { credits: 1 };
+      const userRef = doc(db, 'users', userEmail);
+      let userSnap = await getDoc(userRef);
+      
+      // Verificar se documento existe, se não, criar (migração)
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          email: userEmail,
+          nome: 'Usuário',
+          credits: 10,
+          created_at: serverTimestamp()
+        });
+        console.log('Usuário migrado/criado no Firestore via Login:', userEmail);
+        // Busca o documento recém criado
+        userSnap = await getDoc(userRef);
+      }
+
+      const userData = userSnap.data() || { credits: 1 };
       setUserState(prev => ({ 
         ...prev, 
-        email, 
-        credits: userData.credits || 0,
-        name: userData.name || '',
+        email: userEmail, 
+        credits: userData.credits ?? 0,
+        name: userData.nome || userData.name || '',
         lastPlan: userData.lastPlan || null
       }));
       setScreen(Screen.ONBOARDING);
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `users/${uid}`);
+      console.error('Erro ao processar login no Firestore:', error);
+      handleFirestoreError(error, OperationType.GET, `users/${userEmail}`);
     }
 
     // Solicita permissões de notificação e instalação PWA
@@ -2729,7 +3196,7 @@ const App: React.FC = () => {
           // Registra o token FCM
           const token = await getMessagingToken();
           if (token) {
-            await saveUserToken(uid, token);
+            await saveUserToken(userEmail, token);
           }
         }
       }
@@ -2909,7 +3376,173 @@ const App: React.FC = () => {
       setScreen(Screen.ONBOARDING);
   };
 
+  // ═══════════════════════════════════════════════════════════
+  // FUNÇÕES DA TELA DE CADASTRO
+  // ═══════════════════════════════════════════════════════════
+
+  const handleCriarConta = async () => {
+    if (!cadastroNome || !cadastroEmail || !cadastroSenha || !cadastroConfirmarSenha) {
+      alert('⚠️ Preencha todos os campos');
+      return;
+    }
+    
+    if (cadastroSenha.length < 6) {
+      alert('⚠️ A senha deve ter pelo menos 6 caracteres');
+      return;
+    }
+
+    if (cadastroSenha !== cadastroConfirmarSenha) {
+      alert('⚠️ As senhas não coincidem');
+      return;
+    }
+    
+    try {
+      setIsCadastroLoading(true);
+      const emailLower = cadastroEmail.toLowerCase().trim();
+      
+      // Cria nova conta
+      await createUserWithEmailAndPassword(auth, emailLower, cadastroSenha);
+      
+      // Cria documento no Firestore com créditos iniciais
+      const userRef = doc(db, 'users', emailLower);
+      await setDoc(userRef, {
+        email: emailLower,
+        nome: cadastroNome,
+        credits: 10,
+        created_at: serverTimestamp()
+      });
+      console.log('Novo usuário criado no Firestore via Cadastro:', emailLower);
+
+      // Envia email de boas-vindas
+      try {
+        await fetch('https://us-central1-pandora-ai-7c070.cloudfunctions.net/enviarEmailBoasVindas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: emailLower, name: cadastroNome })
+        });
+        console.log('✅ Email de boas-vindas enviado');
+      } catch (emailError) {
+        console.log('⚠️ Erro ao enviar email:', emailError);
+      }
+      
+      // Cria documento no Firestore e inicializa créditos
+      setUserId(emailLower);
+      
+      setUserState(prev => ({ 
+        ...prev, 
+        email: emailLower,
+        name: cadastroNome,
+        credits: 10
+      }));
+      
+      alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVocê recebeu 10 créditos iniciais.');
+      setScreen(Screen.ONBOARDING);
+      
+    } catch (error: any) {
+      console.error('Erro ao cadastrar:', error);
+      
+      if (error.code === 'auth/email-already-in-use') {
+        alert('❌ Este email já está cadastrado.\n\nUse a tela de login para entrar.');
+      } else if (error.code === 'auth/invalid-email') {
+        alert('❌ Email inválido.\n\nDigite um email válido.');
+      } else if (error.code === 'auth/weak-password') {
+        alert('❌ Senha muito fraca.\n\nUse pelo menos 6 caracteres.');
+      } else {
+        alert('❌ Erro ao criar conta.\n\nTente novamente em alguns instantes.');
+      }
+    } finally {
+      setIsCadastroLoading(false);
+    }
+  };
+
+  const handleGoogleLoginFromCadastro = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      
+      if (!user.email) {
+        alert('Não foi possível obter seu email. Tente novamente.');
+        return;
+      }
+      
+      const userEmail = user.email.toLowerCase().trim();
+      setUserId(userEmail);
+      
+      // Verificar se usuário já existe no Firestore
+      const userRef = doc(db, 'users', userEmail);
+      const userSnap = await getDoc(userRef);
+      let credits = 10;
+      let name = user.displayName || 'Usuário';
+      
+      // Se NÃO existe, criar com créditos iniciais
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          email: userEmail,
+          nome: name,
+          credits: 10,
+          created_at: serverTimestamp()
+        });
+        console.log('Novo usuário criado no Firestore via Google (Cadastro):', userEmail);
+      } else {
+        const userData = userSnap.data();
+        credits = userData.credits ?? 0;
+        name = userData.nome || userData.name || name;
+      }
+      
+      setUserState(prev => ({ 
+        ...prev, 
+        email: userEmail,
+        name: name,
+        credits 
+      }));
+
+      // Limpa campos de cadastro
+      setCadastroEmail('');
+      setCadastroSenha('');
+      setCadastroConfirmarSenha('');
+      
+      setScreen(Screen.ONBOARDING);
+    } catch (error) {
+      console.error('Erro no login Google (Cadastro):', error);
+      alert('Erro ao fazer login com Google. Tente novamente.');
+    }
+  };
+
+  const handleEnviarLinkRecuperacao = async () => {
+    if (!emailRecuperacao || !emailRecuperacao.includes('@')) {
+      alert('⚠️ Digite um email válido');
+      return;
+    }
+    
+    try {
+      const emailLower = emailRecuperacao.toLowerCase().trim();
+      await sendPasswordResetEmail(auth, emailLower);
+      
+      // Limpa o campo e volta para login
+      setEmailRecuperacao('');
+      setScreen(Screen.LOGIN);
+      
+      // Mostra o modal de sucesso
+      setShowSuccessModal(true);
+      
+    } catch (error: any) {
+      console.error('Erro ao enviar email:', error);
+      
+      if (error.code === 'auth/user-not-found') {
+        alert('❌ Email não encontrado.\n\nEste email não está cadastrado.\n\nClique em "Cadastre-se" para criar uma conta.');
+      } else if (error.code === 'auth/invalid-email') {
+        alert('❌ Email inválido.\n\nDigite um email válido.');
+      } else {
+        alert('❌ Erro ao enviar email.\n\nTente novamente em alguns instantes.');
+      }
+    }
+  };
+
   const renderScreen = () => {
+    let content = null;
+    let showBanner = true;
+    let onBack = undefined;
+
     switch (screen) {
       case Screen.SPLASH:
         return <SplashScreen onFinish={handleSplashFinish} />;
@@ -2917,51 +3550,411 @@ const App: React.FC = () => {
         return (
           <LoginScreen 
             onLogin={handleLogin} 
-            onForgotPassword={() => setScreen(Screen.FORGOT_PASSWORD)} 
             onNoRegistration={() => setScreen(Screen.NO_REGISTRATION)}
             setUserId={setUserId}
             setUserState={setUserState}
             setScreen={setScreen}
+            setShowSuccessModal={setShowSuccessModal}
           />
+        );
+      case Screen.CADASTRO:
+        return (
+          <CadastroScreen 
+            onBack={() => setScreen(Screen.LOGIN)}
+            onCriarConta={handleCriarConta}
+            onGoogleLogin={handleGoogleLoginFromCadastro}
+            nome={cadastroNome}
+            setNome={setCadastroNome}
+            email={cadastroEmail}
+            setEmail={setCadastroEmail}
+            senha={cadastroSenha}
+            setSenha={setCadastroSenha}
+            confirmarSenha={cadastroConfirmarSenha}
+            setConfirmarSenha={setCadastroConfirmarSenha}
+            isLoading={isCadastroLoading}
+          />
+        );
+      case Screen.RECUPERAR_SENHA:
+        return (
+          <div style={{
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'white',
+            padding: '20px'
+          }}>
+            
+            <div className="mb-4 w-full flex justify-center">
+              <AppLogo size="md" />
+            </div>
+
+            {/* Card Branco */}
+            <div style={{
+              width: '100%',
+              maxWidth: '400px',
+              background: 'white',
+              padding: '0'
+            }}>
+              
+              <h2 style={{
+                fontSize: '24px',
+                fontWeight: '700',
+                marginBottom: '30px',
+                textAlign: 'center',
+                color: '#1f2937'
+              }}>
+                Recuperar Senha
+              </h2>
+
+              {/* Campo Email */}
+              <div style={{marginBottom: '20px'}}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  color: '#374151',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  EMAIL
+                </label>
+                <div style={{position: 'relative'}}>
+                  <span style={{
+                    position: 'absolute',
+                    left: '15px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: '20px'
+                  }}>
+                    📧
+                  </span>
+                  <input 
+                    type="email"
+                    value={emailRecuperacao}
+                    onChange={(e) => setEmailRecuperacao(e.target.value)}
+                    placeholder="seu@email.com"
+                    autoComplete="email"
+                    style={{
+                      width: '100%',
+                      padding: '16px 16px 16px 50px',
+                      fontSize: '16px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '12px',
+                      outline: 'none',
+                      transition: 'all 0.3s',
+                      boxSizing: 'border-box',
+                      backgroundColor: '#f9fafb'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#a855f7';
+                      e.target.style.backgroundColor = 'white';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb';
+                      e.target.style.backgroundColor = '#f9fafb';
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Botão Enviar - ESTILO PANDORA */}
+              <button 
+                onClick={handleEnviarLinkRecuperacao}
+                disabled={!emailRecuperacao || !emailRecuperacao.includes('@')}
+                style={{
+                  width: '100%',
+                  padding: '18px',
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  color: 'white',
+                  background: (emailRecuperacao && emailRecuperacao.includes('@'))
+                    ? 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)'
+                    : '#d1d5db',
+                  border: 'none',
+                  borderRadius: '50px',
+                  cursor: (emailRecuperacao && emailRecuperacao.includes('@')) ? 'pointer' : 'not-allowed',
+                  marginBottom: '20px',
+                  transition: 'all 0.3s',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  boxShadow: (emailRecuperacao && emailRecuperacao.includes('@')) 
+                    ? '0 4px 15px rgba(168, 85, 247, 0.4)' 
+                    : 'none'
+                }}
+                onMouseOver={(e) => {
+                  if (emailRecuperacao && emailRecuperacao.includes('@')) {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(168, 85, 247, 0.5)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = (emailRecuperacao && emailRecuperacao.includes('@'))
+                    ? '0 4px 15px rgba(168, 85, 247, 0.4)'
+                    : 'none';
+                }}
+              >
+                Enviar Link de Recuperação
+              </button>
+
+              {/* Link Voltar */}
+              <div style={{textAlign: 'center'}}>
+                <a 
+                  onClick={() => {
+                    setEmailRecuperacao('');
+                    setScreen(Screen.LOGIN);
+                  }}
+                  style={{
+                    color: '#8B2CF5',
+                    cursor: 'pointer',
+                    textDecoration: 'none',
+                    fontSize: '15px',
+                    fontWeight: '500'
+                  }}
+                >
+                  ← Voltar para Login
+                </a>
+              </div>
+
+            </div>
+          </div>
+        );
+      case Screen.REDEFINIR_SENHA:
+        return (
+          <div style={{
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'white',
+            padding: '20px'
+          }}>
+            
+            <div className="mb-4 w-full flex justify-center">
+              <AppLogo size="md" />
+            </div>
+
+            <div style={{
+              width: '100%',
+              maxWidth: '400px',
+              background: 'white',
+              padding: '0'
+            }}>
+              
+              <h2 style={{
+                fontSize: '24px',
+                fontWeight: '700',
+                marginBottom: '10px',
+                textAlign: 'center',
+                color: '#1f2937'
+              }}>
+                Redefinir Senha
+              </h2>
+              
+              <p style={{
+                color: '#6b7280',
+                fontSize: '14px',
+                textAlign: 'center',
+                marginBottom: '30px'
+              }}>
+                Digite sua nova senha abaixo.
+              </p>
+
+              {/* Campo Nova Senha */}
+              <div style={{marginBottom: '20px'}}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  color: '#374151',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  NOVA SENHA
+                </label>
+                <div style={{position: 'relative'}}>
+                  <span style={{
+                    position: 'absolute',
+                    left: '15px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: '20px'
+                  }}>
+                    🔒
+                  </span>
+                  <input 
+                    type="password"
+                    value={novaSenhaRedefinir}
+                    onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    style={{
+                      width: '100%',
+                      padding: '16px 16px 16px 50px',
+                      fontSize: '16px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '12px',
+                      outline: 'none',
+                      transition: 'all 0.3s',
+                      boxSizing: 'border-box',
+                      backgroundColor: '#f9fafb'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#a855f7';
+                      e.target.style.backgroundColor = 'white';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb';
+                      e.target.style.backgroundColor = '#f9fafb';
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Campo Confirmar Senha */}
+              <div style={{marginBottom: '25px'}}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  color: '#374151',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  CONFIRMAR SENHA
+                </label>
+                <div style={{position: 'relative'}}>
+                  <span style={{
+                    position: 'absolute',
+                    left: '15px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: '20px'
+                  }}>
+                    🔐
+                  </span>
+                  <input 
+                    type="password"
+                    value={confirmarNovaSenhaRedefinir}
+                    onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
+                    placeholder="Digite a senha novamente"
+                    style={{
+                      width: '100%',
+                      padding: '16px 16px 16px 50px',
+                      fontSize: '16px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '12px',
+                      outline: 'none',
+                      transition: 'all 0.3s',
+                      boxSizing: 'border-box',
+                      backgroundColor: '#f9fafb'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#a855f7';
+                      e.target.style.backgroundColor = 'white';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb';
+                      e.target.style.backgroundColor = '#f9fafb';
+                    }}
+                  />
+                </div>
+                {confirmarNovaSenhaRedefinir && novaSenhaRedefinir !== confirmarNovaSenhaRedefinir && (
+                  <p style={{color: '#ef4444', fontSize: '13px', marginTop: '8px', textAlign: 'left'}}>
+                    ⚠️ As senhas não coincidem
+                  </p>
+                )}
+              </div>
+
+              {/* Botão Salvar */}
+              <button 
+                onClick={handleSalvarNovaSenha}
+                disabled={
+                  !novaSenhaRedefinir || 
+                  !confirmarNovaSenhaRedefinir ||
+                  novaSenhaRedefinir !== confirmarNovaSenhaRedefinir ||
+                  novaSenhaRedefinir.length < 6
+                }
+                style={{
+                  width: '100%',
+                  padding: '18px',
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  color: 'white',
+                  background: (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6)
+                    ? 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)'
+                    : '#d1d5db',
+                  border: 'none',
+                  borderRadius: '50px',
+                  cursor: (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6) ? 'pointer' : 'not-allowed',
+                  transition: 'all 0.3s',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  boxShadow: (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6) 
+                    ? '0 4px 15px rgba(168, 85, 247, 0.4)' 
+                    : 'none'
+                }}
+                onMouseOver={(e) => {
+                  if (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6) {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(168, 85, 247, 0.5)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6)
+                    ? '0 4px 15px rgba(168, 85, 247, 0.4)'
+                    : 'none';
+                }}
+              >
+                Salvar Nova Senha
+              </button>
+
+            </div>
+          </div>
         );
       case Screen.NO_REGISTRATION:
         return <NoRegistrationScreen onBack={() => setScreen(Screen.LOGIN)} />;
-      case Screen.FORGOT_PASSWORD:
-        return <ForgotPasswordScreen onBack={() => setScreen(Screen.LOGIN)} />;
       case Screen.ONBOARDING:
-        return (
+        content = (
           <HomeScreen 
              onUpload={handleHomeUpload} 
              onContinue={handleConfirmUpload}
              uploadedImage={userState.uploadedImage}
              userName={getUserName()} 
-             credits={userState.credits}
-             onOpenCredits={handleOpenCredits}
              onOpenFAQ={handleOpenFAQ}
           />
         );
+        break;
       case Screen.FAQ:
-        return <FAQScreen onBack={handleBackFromFAQ} />;
+        content = <FAQScreen onBack={handleBackFromFAQ} />;
+        onBack = handleBackFromFAQ;
+        showBanner = false; // Hide banner on FAQ
+        break;
       case Screen.UPLOAD:
-        return (
+        content = (
            <HomeScreen 
              onUpload={handleHomeUpload} 
              onContinue={handleConfirmUpload}
              uploadedImage={userState.uploadedImage}
              userName={getUserName()} 
-             credits={userState.credits}
-             onOpenCredits={handleOpenCredits}
              onOpenFAQ={handleOpenFAQ}
            />
-        ); 
+        );
+        break;
       case Screen.CREDITS:
-        return (
+        content = (
             <ProfileScreen 
                 userId={userId}
                 userState={userState}
                 setUserState={setUserState}
                 history={userState.history}
-                onAddCredits={handleAddCredits}
+                onAddCredits={handleOpenCredits}
                 onBuyCredits={handleBuyCredits}
                 onBack={handleBackToHome}
                 onUpdateProfile={handleUpdateProfile}
@@ -2971,10 +3964,15 @@ const App: React.FC = () => {
                 setScreen={setScreen}
             />
         );
+        onBack = handleBackToHome;
+        showBanner = false; // Hide banner on Profile
+        break;
       case Screen.CATEGORY:
-        return <CategoryScreen onSelect={handleCategorySelect} onBack={() => setScreen(Screen.ONBOARDING)} />;
+        content = <CategoryScreen onSelect={handleCategorySelect} onBack={() => setScreen(Screen.ONBOARDING)} />;
+        onBack = () => setScreen(Screen.ONBOARDING);
+        break;
       case Screen.FINALIZE:
-        return (
+        content = (
           <FinalizeScreen 
             category={userState.selectedCategory!} 
             userImage={userState.uploadedImage}
@@ -2984,6 +3982,8 @@ const App: React.FC = () => {
             loading={false}
           />
         );
+        onBack = () => setScreen(Screen.CATEGORY);
+        break;
       case Screen.LOADING:
         return (
           <LoadingScreen 
@@ -2993,7 +3993,7 @@ const App: React.FC = () => {
           />
         );
       case Screen.RESULT:
-        return (
+        content = (
           <ResultScreen 
             userImage={userState.uploadedImage}
             clothingImage={userState.clothingImage}
@@ -3003,40 +4003,82 @@ const App: React.FC = () => {
             onBack={() => setScreen(Screen.CATEGORY)}
           />
         );
+        onBack = () => setScreen(Screen.CATEGORY);
+        break;
       case Screen.VIEW_360:
-         return (
+         content = (
            <View360Screen 
              userImage={userState.uploadedImage}
              onGenerate360={handleGenerate360}
              onBack={() => setScreen(Screen.RESULT)}
            />
          );
+         onBack = () => setScreen(Screen.RESULT);
+         break;
       case Screen.RESULT_360:
-         return (
+         content = (
            <Result360Screen 
              images={userState.generated360Images}
              onRestart={handleRestart}
-             onBack={() => setScreen(Screen.VIEW_360)}
+             onBack={handleBackToHome}
            />
          );
+         onBack = handleBackToHome;
+         break;
       default:
         return (
           <LoginScreen 
             onLogin={handleLogin} 
-            onForgotPassword={() => setScreen(Screen.FORGOT_PASSWORD)} 
             onNoRegistration={() => setScreen(Screen.NO_REGISTRATION)}
             setUserId={setUserId}
             setUserState={setUserState}
             setScreen={setScreen}
+            setShowSuccessModal={setShowSuccessModal}
           />
         );
     }
+
+    if (content) {
+      return (
+        <MainLayout 
+          credits={userState.credits} 
+          onOpenCredits={handleOpenCredits} 
+          onOpenFAQ={handleOpenFAQ}
+          showBanner={showBanner}
+          onBack={onBack}
+        >
+          {content}
+        </MainLayout>
+      );
+    }
+    return null;
   };
 
   return (
     <ErrorBoundary>
       <div className="w-full h-[100dvh] max-w-lg mx-auto bg-white shadow-2xl overflow-hidden relative font-sans text-gray-900 flex flex-col">
         {renderScreen()}
+
+        {/* Modal de Sucesso Recuperação de Senha */}
+        {showSuccessModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl transform animate-scale-in text-center">
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
+                <Check size={40} strokeWidth={3} />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Link Enviado!</h3>
+              <p className="text-gray-600 mb-2">
+                Foi enviado para você um link de recuperação para você redefinir sua senha.
+              </p>
+              <p className="text-gray-500 text-sm mb-8">
+                Cheque o seu e-mail e sua caixa de spam.
+              </p>
+              <Button onClick={() => setShowSuccessModal(false)} className="w-full">
+                Entendi
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );

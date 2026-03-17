@@ -32,12 +32,18 @@ npm install
 ```
 
 ### 3. Configurar Variáveis de Ambiente
-Todas as chaves (Firebase e Gemini) são configuradas através do arquivo `.env`. Como solicitado, o arquivo `.env` **não está sendo ignorado** pelo Git, então as chaves que você colocar nele serão enviadas para o seu repositório.
 
-Crie/edite o arquivo `.env` na raiz do projeto:
+Crie um arquivo `.env` na raiz do projeto baseado no arquivo `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+Edite o arquivo `.env` e adicione suas chaves:
 
 ```env
 GEMINI_API_KEY=sua_chave_gemini
+ABACATE_API_KEY=sua_chave_abacatepay
 FIREBASE_API_KEY=sua_chave_firebase
 FIREBASE_AUTH_DOMAIN=seu_dominio_firebase
 FIREBASE_PROJECT_ID=seu_id_projeto
@@ -59,7 +65,7 @@ npm run build
 
 ## Segurança
 
-**Importante:** Nunca suba seu arquivo `.env` com chaves reais para o GitHub. O projeto já está configurado para usar variáveis de ambiente, garantindo que suas chaves fiquem protegidas.
+**Importante:** O arquivo `.env` está incluído no `.gitignore` para evitar que suas chaves reais sejam enviadas para o GitHub. Nunca compartilhe suas chaves de API publicamente.
 
 ---
 Desenvolvido com ❤️ por Pandora AI Team.
