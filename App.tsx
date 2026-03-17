@@ -2997,6 +2997,8 @@ const CadastroScreen: React.FC<{
 const App: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    
+    // Detecta pagamento bem-sucedido
     const payment = params.get('payment');
     const paidUserId = params.get('userId');
     const credits = parseInt(params.get('credits') || '0');
@@ -3007,13 +3009,10 @@ const App: React.FC = () => {
         alert(`✅ ${credits} créditos adicionados!`);
       });
     }
-  }, []);
 
-  useEffect(() => {
     // Detecta se a URL tem parâmetros de reset de senha
-    const urlParams = new URLSearchParams(window.location.search);
-    const mode = urlParams.get('mode');
-    const code = urlParams.get('oobCode');
+    const mode = params.get('mode');
+    const code = params.get('oobCode');
     
     if (mode === 'resetPassword' && code) {
       setOobCode(code);
@@ -3057,19 +3056,6 @@ const App: React.FC = () => {
     lastPlan: null
   });
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const payment = params.get('payment');
-    const paidUserId = params.get('userId');
-    const credits = parseInt(params.get('credits') || '0');
-    
-    if (payment === 'success' && paidUserId && credits > 0) {
-      addCredits(paidUserId, credits).then(() => {
-        window.history.replaceState({}, '', '/');
-        alert(`✅ ${credits} créditos adicionados!`);
-      });
-    }
-  }, []);
 
   const getUserName = () => {
     if (userState.name) return userState.name;
@@ -3092,18 +3078,6 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [userId]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const payment = params.get('payment');
-    const paidUserId = params.get('userId');
-    const credits = parseInt(params.get('credits') || '0');
-    
-    if (payment === 'success' && paidUserId && credits > 0) {
-      addCredits(paidUserId, credits).then(() => {
-        window.history.replaceState({}, '', '/');
-      });
-    }
-  }, []);
 
   const handleSalvarNovaSenha = async () => {
     if (!novaSenhaRedefinir || novaSenhaRedefinir.length < 6) {
@@ -3914,6 +3888,28 @@ const App: React.FC = () => {
               >
                 Salvar Nova Senha
               </button>
+              
+              {/* Link Voltar */}
+              <div style={{textAlign: 'center', marginTop: '20px'}}>
+                <a 
+                  onClick={() => {
+                    setNovaSenhaRedefinir('');
+                    setConfirmarNovaSenhaRedefinir('');
+                    setOobCode('');
+                    window.history.replaceState({}, document.title, '/');
+                    setScreen(Screen.LOGIN);
+                  }}
+                  style={{
+                    color: '#8B2CF5',
+                    cursor: 'pointer',
+                    textDecoration: 'none',
+                    fontSize: '15px',
+                    fontWeight: '500'
+                  }}
+                >
+                  ← Voltar para Login
+                </a>
+              </div>
 
             </div>
           </div>
