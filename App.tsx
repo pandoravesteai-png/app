@@ -780,69 +780,38 @@ const LoginScreen: React.FC<{
         return;
       }
       
-      // USA O EMAIL COMO ID DO DOCUMENTO
       const userEmail = user.email.toLowerCase().trim();
-      
-      console.log('Login Google - Email:', userEmail);
-      
+      const name = user.displayName || 'Usuário';
+
+      // Vai para o app IMEDIATAMENTE
       setUserId(userEmail);
-      
-      // Verificar se usuário já existe no Firestore
-      const userRef = doc(db, 'users', userEmail);
-      const userSnap = await getDoc(userRef);
-      let credits = 10;
-      let name = user.displayName || 'Usuário';
-      
-      // Se NÃO existe, criar com créditos iniciais
-      if (!userSnap.exists()) {
-        await setDoc(userRef, {
-          email: userEmail,
-          nome: name,
-          credits: 10,
-          created_at: serverTimestamp()
-        });
-        console.log('Novo usuário criado no Firestore via Google:', userEmail);
-      } else {
-        const userData = userSnap.data();
-        credits = userData.credits ?? 0;
-        name = userData.nome || userData.name || name;
-      }
-      
-      // Atualiza estado
       setUserState(prev => ({ 
         ...prev, 
         email: userEmail,
         name: name,
-        credits 
+        credits: 10
       }));
-      
       setScreen(Screen.ONBOARDING);
-      
-      // Solicita permissões de notificação e instalação PWA
-      const requestPermissions = async () => {
-        // 1. Permissão de Notificações
-        if ('Notification' in window && Notification.permission === 'default') {
-          const permission = await Notification.requestPermission();
-          if (permission === 'granted') {
-            // Registra o token FCM
-            const token = await getMessagingToken();
-            if (token) {
-              await saveUserToken(userEmail, token);
-            }
-          }
-        }
-        
-        // 2. Prompt de Instalação PWA
-        if (window.deferredPrompt) {
-          const { outcome } = await window.deferredPrompt.prompt();
-          if (outcome === 'accepted') {
-            console.log('PWA instalado!');
-          }
-          window.deferredPrompt = null;
-        }
-      };
 
-      setTimeout(requestPermissions, 2000); // Aguarda 2s após login
+      // Busca/cria dados no Firestore em segundo plano
+      const userRef = doc(db, 'users', userEmail);
+      getDoc(userRef).then(async (userSnap) => {
+        if (!userSnap.exists()) {
+          await setDoc(userRef, {
+            email: userEmail,
+            nome: name,
+            credits: 10,
+            created_at: serverTimestamp()
+          });
+        } else {
+          const userData = userSnap.data();
+          setUserState(prev => ({ 
+            ...prev, 
+            credits: userData.credits ?? 0,
+            name: userData.nome || userData.name || name,
+          }));
+        }
+      }).catch(console.error);
       
     } catch (error) {
       console.error('Erro no login Google:', error);
@@ -2061,10 +2030,21 @@ const HomeScreen: React.FC<{
     uploadedImage?: string | null;
     userName?: string;
     onOpenFAQ: () => void;
-}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ }) => {
+    isFirstLogin?: boolean;
+    onGuiaVisto?: () => void;
+}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, onGuiaVisto }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
+
+  useEffect(() => {
+    if (isFirstLogin) {
+      const timer = setTimeout(() => {
+        setShowPhotoGuide(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isFirstLogin]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -2135,7 +2115,10 @@ const HomeScreen: React.FC<{
               </div>
             </div>
             
-            <Button onClick={() => setShowPhotoGuide(false)} className="mt-6">Entendi!</Button>
+            <Button onClick={() => { 
+              setShowPhotoGuide(false); 
+              if (onGuiaVisto) onGuiaVisto();
+            }} className="mt-6">Entendi!</Button>
           </div>
         </div>
       )}
@@ -2184,7 +2167,14 @@ const HomeScreen: React.FC<{
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center pl-1 pr-1">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Sua Foto</span>
-              <button onClick={() => setShowPhotoGuide(true)} className="text-purple-600 flex items-center gap-1 text-[10px] font-bold uppercase hover:underline">
+              <button 
+                onClick={() => setShowPhotoGuide(true)} 
+                className={`flex items-center gap-1 text-[10px] font-bold uppercase hover:underline transition-all
+                  ${isFirstLogin 
+                    ? 'text-white bg-purple-600 px-3 py-1.5 rounded-full animate-pulse shadow-lg shadow-purple-300' 
+                    : 'text-purple-600'
+                  }`}
+              >
                 <Info size={12} /> Guia de Foto
               </button>
             </div>
@@ -3100,6 +3090,7 @@ const App: React.FC = () => {
   const [oobCode, setOobCode] = useState('');
   const [novaSenhaRedefinir, setNovaSenhaRedefinir] = useState('');
   const [confirmarNovaSenhaRedefinir, setConfirmarNovaSenhaRedefinir] = useState('');
+  const [isFirstLogin, setIsFirstLogin] = useState(false);
 
   const [userState, setUserState] = useState<UserState>({
     email: '',
@@ -3148,6 +3139,11 @@ const App: React.FC = () => {
                 ? Screen.ONBOARDING 
                 : prev
             );
+
+            const jaViuGuia = localStorage.getItem(`guia_visto_${userEmail}`);
+            if (!jaViuGuia) {
+              setIsFirstLogin(true);
+            }
           }
         } catch (error) {
           console.error('Erro ao recuperar sessão:', error);
@@ -3806,6 +3802,11 @@ const App: React.FC = () => {
              uploadedImage={userState.uploadedImage}
              userName={getUserName()} 
              onOpenFAQ={handleOpenFAQ}
+             isFirstLogin={isFirstLogin}
+             onGuiaVisto={() => {
+               setIsFirstLogin(false);
+               localStorage.setItem(`guia_visto_${userId}`, 'true');
+             }}
           />
         );
         break;
@@ -3822,6 +3823,11 @@ const App: React.FC = () => {
              uploadedImage={userState.uploadedImage}
              userName={getUserName()} 
              onOpenFAQ={handleOpenFAQ}
+             isFirstLogin={isFirstLogin}
+             onGuiaVisto={() => {
+               setIsFirstLogin(false);
+               localStorage.setItem(`guia_visto_${userId}`, 'true');
+             }}
            />
         );
         break;
