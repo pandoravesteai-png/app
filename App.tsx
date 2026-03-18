@@ -3002,39 +3002,6 @@ const CadastroScreen: React.FC<{
 };
 
 const App: React.FC = () => {
-  useEffect(() => {
-    console.log('🔍 Verificando URL para redefinição de senha...');
-    
-    // Pegar parâmetros da URL
-    const urlParams = new URLSearchParams(window.location.search);
-    
-    // Detecta pagamento bem-sucedido
-    const payment = urlParams.get('payment');
-    const paidUserId = urlParams.get('userId');
-    const credits = parseInt(urlParams.get('credits') || '0');
-    
-    if (payment === 'success' && paidUserId && credits > 0) {
-      addCredits(paidUserId, credits).then(() => {
-        window.history.replaceState({}, '', '/');
-        alert(`✅ ${credits} créditos adicionados!`);
-      });
-    }
-
-    // Detecta se a URL tem parâmetros de reset de senha
-    const mode = urlParams.get('mode');
-    const code = urlParams.get('oobCode');
-    
-    console.log('Mode:', mode);
-    console.log('OobCode:', code ? 'Presente' : 'Ausente');
-    
-    // Se for link de redefinição de senha
-    if (mode === 'resetPassword' && code) {
-      console.log('✅ Link de redefinição detectado! Abrindo tela...');
-      setOobCode(code);
-      setScreen(Screen.REDEFINIR_SENHA);
-    }
-  }, []);
-
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
@@ -3070,6 +3037,37 @@ const App: React.FC = () => {
     history: [],
     lastPlan: null
   });
+
+  useEffect(() => {
+    console.log('🔍 Verificando URL...');
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    // Detecta pagamento bem-sucedido
+    const payment = urlParams.get('payment');
+    const paidUserId = urlParams.get('userId');
+    const credits = parseInt(urlParams.get('credits') || '0');
+    
+    if (payment === 'success' && paidUserId && credits > 0) {
+      addCredits(paidUserId, credits).then(() => {
+        window.history.replaceState({}, '', '/');
+        alert(`✅ ${credits} créditos adicionados!`);
+      });
+    }
+
+    // Detecta se a URL tem parâmetros de reset de senha
+    const mode = urlParams.get('mode');
+    const code = urlParams.get('oobCode');
+    
+    console.log('Mode:', mode);
+    console.log('OobCode:', code ? 'Presente' : 'Ausente');
+    
+    if (mode === 'resetPassword' && code) {
+      console.log('✅ Link detectado! Abrindo tela de redefinir senha...');
+      setOobCode(code);
+      setScreen(Screen.REDEFINIR_SENHA);
+    }
+  }, []);
 
 
   const getUserName = () => {
@@ -3118,18 +3116,10 @@ const App: React.FC = () => {
       await confirmPasswordReset(auth, oobCode, novaSenhaRedefinir);
       
       console.log('✅ Senha atualizada com sucesso!');
-      alert('✅ Senha alterada com sucesso! Faça login com sua nova senha.');
+      alert('✅ Senha alterada com sucesso!');
       
-      // Limpar URL
-      window.history.replaceState({}, document.title, '/');
-      
-      // Limpar campos
-      setNovaSenhaRedefinir('');
-      setConfirmarNovaSenhaRedefinir('');
-      setOobCode('');
-      
-      // Voltar para login
-      setScreen(Screen.LOGIN);
+      // Redirecionar para o site oficial
+      window.location.href = 'https://pandoravesteai.com';
       
     } catch (error: any) {
       console.error('❌ Erro ao redefinir senha:', error);
@@ -3623,135 +3613,63 @@ const App: React.FC = () => {
         );
       case Screen.REDEFINIR_SENHA:
         return (
-          <div style={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            padding: '20px'
-          }}>
-            <div style={{
-              background: 'white',
-              borderRadius: '20px',
-              padding: '40px',
-              maxWidth: '450px',
-              width: '100%',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
-            }}>
-              
-              <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                <h1 style={{
-                  fontSize: '36px',
-                  fontWeight: 'bold',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
-                }}>
-                  PANDORA AI
-                </h1>
-                <p style={{ color: '#666', fontSize: '14px' }}>
-                  TRANSFORME SEU ESTILO COM IA
-                </p>
-              </div>
+          <div className="min-h-screen flex flex-col items-center justify-center bg-white p-6 animate-fade-in">
+            <div className="w-full max-w-md space-y-10">
+              <AppLogo size="lg" />
 
-              <h2 style={{
-                fontSize: '24px',
-                fontWeight: 'bold',
-                textAlign: 'center',
-                marginBottom: '30px'
-              }}>
-                Redefinir Senha
-              </h2>
+              <div className="space-y-6">
+                <Input
+                  label="NOVA SENHA"
+                  type="password"
+                  placeholder="••••••••"
+                  value={novaSenhaRedefinir}
+                  onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
+                  icon={<Lock size={20} />}
+                />
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                
-                {/* Nova Senha */}
-                <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontWeight: '600',
-                    fontSize: '14px'
-                  }}>
-                    NOVA SENHA
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Mínimo 6 caracteres"
-                    value={novaSenhaRedefinir}
-                    onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '14px',
-                      borderRadius: '12px',
-                      border: '2px solid #e0e0e0',
-                      fontSize: '16px'
-                    }}
-                  />
+                <Input
+                  label="REPETIR SENHA"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmarNovaSenhaRedefinir}
+                  onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
+                  icon={<Lock size={20} />}
+                />
+
+                {confirmarNovaSenhaRedefinir && novaSenhaRedefinir !== confirmarNovaSenhaRedefinir && (
+                  <p className="text-red-500 text-xs font-semibold ml-1 animate-pulse">
+                    ⚠️ As senhas não coincidem
+                  </p>
+                )}
+
+                <div className="pt-4">
+                  <Button
+                    onClick={handleSalvarNovaSenha}
+                    disabled={
+                      !novaSenhaRedefinir || 
+                      !confirmarNovaSenhaRedefinir ||
+                      novaSenhaRedefinir !== confirmarNovaSenhaRedefinir ||
+                      novaSenhaRedefinir.length < 6
+                    }
+                  >
+                    Salvar Nova Senha
+                  </Button>
                 </div>
 
-                {/* Confirmar Senha */}
-                <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontWeight: '600',
-                    fontSize: '14px'
-                  }}>
-                    CONFIRMAR SENHA
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Digite novamente"
-                    value={confirmarNovaSenhaRedefinir}
-                    onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '14px',
-                      borderRadius: '12px',
-                      border: '2px solid #e0e0e0',
-                      fontSize: '16px'
+                <div className="text-center">
+                  <button 
+                    onClick={() => {
+                      setNovaSenhaRedefinir('');
+                      setConfirmarNovaSenhaRedefinir('');
+                      setOobCode('');
+                      window.history.replaceState({}, document.title, '/');
+                      setScreen(Screen.LOGIN);
                     }}
-                  />
+                    className="text-gray-400 hover:text-purple-600 transition-colors text-sm font-medium"
+                  >
+                    ← Voltar para Login
+                  </button>
                 </div>
-
-                {/* Botão Salvar */}
-                <button
-                  onClick={handleSalvarNovaSenha}
-                  style={{
-                    width: '100%',
-                    padding: '16px',
-                    borderRadius: '12px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white',
-                    fontSize: '16px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    marginTop: '10px'
-                  }}
-                >
-                  Salvar Nova Senha
-                </button>
-
-                {/* Voltar */}
-                <button
-                  onClick={() => {
-                    window.history.replaceState({}, document.title, '/');
-                    setScreen(Screen.LOGIN);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#667eea',
-                    fontSize: '14px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  ← Voltar para login
-                </button>
-
               </div>
             </div>
           </div>
