@@ -3021,7 +3021,7 @@ const App: React.FC = () => {
   }, []);
 
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [screen, setScreen] = useState<Screen>(Screen.REDEFINIR_SENHA); 
+  const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
   const [userId, setUserId] = useState<string>('');

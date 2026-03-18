@@ -17,6 +17,9 @@ node_modules
 dist
 dist-ssr
 
+# Firebase config (contains sensitive keys)
+firebase-applet-config.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
