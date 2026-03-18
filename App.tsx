@@ -1295,16 +1295,96 @@ const ProfileScreen: React.FC<{
                     ÚLTIMO PLANO
                   </label>
                   
-                  <div style={{
-                    padding: '12px',
-                    background: '#f5f5f5',
-                    borderRadius: '8px',
-                    fontSize: '15px',
-                    fontWeight: '500',
-                    color: userState.lastPlan ? '#9333ea' : '#999',
-                  }}>
-                    {userState.lastPlan || 'Nenhum plano comprado ainda'}
-                  </div>
+                  {userState.lastPlan ? (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #f3e8ff, #fce7f3)',
+                      border: '1px solid #e9d5ff',
+                      borderRadius: '16px',
+                      padding: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '14px',
+                    }}>
+                      {/* Ícone do plano */}
+                      <div style={{
+                        width: '48px',
+                        height: '48px',
+                        borderRadius: '12px',
+                        background: userState.lastPlan === 'Premium' 
+                          ? 'linear-gradient(135deg, #9333ea, #ec4899)' 
+                          : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '22px',
+                        flexShrink: 0,
+                      }}>
+                        {userState.lastPlan === 'Premium' ? '👑' : '⚡'}
+                      </div>
+
+                      {/* Infos do plano */}
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          fontSize: '16px',
+                          fontWeight: 'bold',
+                          color: '#6b21a8',
+                          marginBottom: '2px',
+                        }}>
+                          Plano {userState.lastPlan}
+                        </div>
+                        <div style={{
+                          fontSize: '13px',
+                          color: '#9333ea',
+                          fontWeight: '500',
+                        }}>
+                          {userState.lastPurchaseCredits 
+                            ? `${userState.lastPurchaseCredits} créditos` 
+                            : userState.lastPlan === 'Premium' ? '300 créditos' : '100 créditos'}
+                          {userState.lastPurchaseAmount 
+                            ? ` · R$ ${Number(userState.lastPurchaseAmount).toFixed(2).replace('.', ',')}` 
+                            : ''}
+                        </div>
+                        {userState.lastPurchaseDate && (
+                          <div style={{
+                            fontSize: '11px',
+                            color: '#a855f7',
+                            marginTop: '2px',
+                          }}>
+                            {new Date(userState.lastPurchaseDate?.toDate?.() || userState.lastPurchaseDate).toLocaleDateString('pt-BR', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Badge status */}
+                      <div style={{
+                        background: '#dcfce7',
+                        color: '#16a34a',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        padding: '4px 8px',
+                        borderRadius: '20px',
+                        flexShrink: 0,
+                      }}>
+                        ✓ ATIVO
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '16px',
+                      background: '#f9fafb',
+                      borderRadius: '12px',
+                      border: '1px dashed #e5e7eb',
+                      textAlign: 'center',
+                      color: '#9ca3af',
+                      fontSize: '14px',
+                    }}>
+                      Nenhum plano comprado ainda
+                    </div>
+                  )}
                 </div>
 
                 {/* Card de Saldo Simplificado */}
@@ -3035,7 +3115,10 @@ const App: React.FC = () => {
     generated360Images: null,
     credits: 0,
     history: [],
-    lastPlan: null
+    lastPlan: null,
+    lastPurchaseAmount: null,
+    lastPurchaseCredits: null,
+    lastPurchaseDate: null
   });
 
   useEffect(() => {
@@ -3085,7 +3168,10 @@ const App: React.FC = () => {
         ...prev, 
         credits: data.credits || 0,
         name: data.name || prev.name,
-        lastPlan: data.lastPlan || null
+        lastPlan: data.lastPurchasePlan || data.lastPlan || null,
+        lastPurchaseAmount: data.lastPurchaseAmount || null,
+        lastPurchaseCredits: data.lastPurchaseCredits || null,
+        lastPurchaseDate: data.lastPurchase || null,
       }));
     });
     return () => unsubscribe();

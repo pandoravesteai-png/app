@@ -44,6 +44,9 @@ export interface UserState {
   credits: number;
   history: HistoryItem[];
   lastPlan: string | null;
+  lastPurchaseAmount?: number | null;
+  lastPurchaseCredits?: number | null;
+  lastPurchaseDate?: any | null;
 }
 
 export interface CategoryItem {
