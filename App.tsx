@@ -751,7 +751,7 @@ const LoginScreen: React.FC<{
       
       // Configurações para o link de recuperação apontar de volta para o app
       const actionCodeSettings = {
-        url: window.location.origin,
+        url: 'https://pandoravesteai.com',
         handleCodeInApp: true,
       };
       
@@ -3505,7 +3505,7 @@ const App: React.FC = () => {
       
       // Configurações para o link de recuperação apontar de volta para o app
       const actionCodeSettings = {
-        url: window.location.origin,
+        url: 'https://pandoravesteai.com',
         handleCodeInApp: true,
       };
       
