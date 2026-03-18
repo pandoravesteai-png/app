@@ -3,33 +3,12 @@ import { getAnalytics } from "firebase/analytics";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User, deleteUser, signOut } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-// Firebase configuration using environment variables with fallback to config file
-let firebaseConfig: any = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID,
-};
-
-const firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
-
-// Fallback to local config file if environment variables are missing (for local dev)
-if (!firebaseConfig.apiKey) {
-  try {
-    // We use a dynamic import to avoid build errors if the file is missing on GitHub
-    const localConfig = await import("../firebase-applet-config.json");
-    firebaseConfig = localConfig.default;
-  } catch (e) {
-    console.warn("Firebase configuration not found. Please check your .env file.");
-  }
-}
+// Import the Firebase configuration
+import firebaseConfig from "../firebase-applet-config.json";
 
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firestoreDatabaseId || (firebaseConfig as any).firestoreDatabaseId);
+export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

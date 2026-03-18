@@ -3021,8 +3021,7 @@ const App: React.FC = () => {
   }, []);
 
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [isSplashFinished, setIsSplashFinished] = useState(false);
-  const [screen, setScreen] = useState<Screen>(Screen.LOGIN); 
+  const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
   const [userId, setUserId] = useState<string>('');
@@ -3124,7 +3123,7 @@ const App: React.FC = () => {
   };
 
   const handleSplashFinish = () => {
-    setIsSplashFinished(true);
+    setScreen(Screen.LOGIN);
   };
 
   const handleLogin = async (email: string, userIdFromLogin: string) => {
@@ -3514,15 +3513,13 @@ const App: React.FC = () => {
   };
 
   const renderScreen = () => {
-    if (!isSplashFinished) {
-      return <SplashScreen onFinish={handleSplashFinish} />;
-    }
-
     let content = null;
     let showBanner = true;
     let onBack = undefined;
 
     switch (screen) {
+      case Screen.SPLASH:
+        return <SplashScreen onFinish={handleSplashFinish} />;
       case Screen.LOGIN:
         return (
           <LoginScreen 
