@@ -26,7 +26,11 @@ export const logout = async (): Promise<void> => {
 };
 
 export const resetPassword = async (email: string): Promise<void> => {
-  return await sendPasswordResetEmail(auth, email);
+  const actionCodeSettings = {
+    url: window.location.origin,
+    handleCodeInApp: true,
+  };
+  return await sendPasswordResetEmail(auth, email, actionCodeSettings);
 };
 
 export const getCurrentUser = (): User | null => {

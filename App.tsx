@@ -748,7 +748,14 @@ const LoginScreen: React.FC<{
     
     try {
       const emailLower = emailInput.toLowerCase().trim();
-      await sendPasswordResetEmail(auth, emailLower);
+      
+      // Configurações para o link de recuperação apontar de volta para o app
+      const actionCodeSettings = {
+        url: window.location.origin,
+        handleCodeInApp: true,
+      };
+      
+      await sendPasswordResetEmail(auth, emailLower, actionCodeSettings);
       
       setShowSuccessModal(true);
     } catch (error: any) {
@@ -2996,12 +3003,15 @@ const CadastroScreen: React.FC<{
 
 const App: React.FC = () => {
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    console.log('🔍 Verificando URL para redefinição de senha...');
+    
+    // Pegar parâmetros da URL
+    const urlParams = new URLSearchParams(window.location.search);
     
     // Detecta pagamento bem-sucedido
-    const payment = params.get('payment');
-    const paidUserId = params.get('userId');
-    const credits = parseInt(params.get('credits') || '0');
+    const payment = urlParams.get('payment');
+    const paidUserId = urlParams.get('userId');
+    const credits = parseInt(urlParams.get('credits') || '0');
     
     if (payment === 'success' && paidUserId && credits > 0) {
       addCredits(paidUserId, credits).then(() => {
@@ -3011,10 +3021,15 @@ const App: React.FC = () => {
     }
 
     // Detecta se a URL tem parâmetros de reset de senha
-    const mode = params.get('mode');
-    const code = params.get('oobCode');
+    const mode = urlParams.get('mode');
+    const code = urlParams.get('oobCode');
     
+    console.log('Mode:', mode);
+    console.log('OobCode:', code ? 'Presente' : 'Ausente');
+    
+    // Se for link de redefinição de senha
     if (mode === 'resetPassword' && code) {
+      console.log('✅ Link de redefinição detectado! Abrindo tela...');
       setOobCode(code);
       setScreen(Screen.REDEFINIR_SENHA);
     }
@@ -3080,44 +3095,51 @@ const App: React.FC = () => {
 
 
   const handleSalvarNovaSenha = async () => {
-    if (!novaSenhaRedefinir || novaSenhaRedefinir.length < 6) {
-      alert('⚠️ A senha deve ter pelo menos 6 caracteres');
+    // Validações
+    if (!novaSenhaRedefinir || !confirmarNovaSenhaRedefinir) {
+      alert('Preencha todos os campos!');
       return;
     }
     
     if (novaSenhaRedefinir !== confirmarNovaSenhaRedefinir) {
-      alert('⚠️ As senhas não coincidem');
+      alert('As senhas não coincidem!');
+      return;
+    }
+    
+    if (novaSenhaRedefinir.length < 6) {
+      alert('A senha deve ter no mínimo 6 caracteres!');
       return;
     }
     
     try {
-      // Confirma a redefinição usando o código da URL
+      console.log('💾 Salvando nova senha no Firebase...');
+      
+      // FIREBASE: Atualizar senha
       await confirmPasswordReset(auth, oobCode, novaSenhaRedefinir);
       
-      alert('✅ Senha alterada com sucesso!\n\nVocê já pode fazer login com sua nova senha.');
+      console.log('✅ Senha atualizada com sucesso!');
+      alert('✅ Senha alterada com sucesso! Faça login com sua nova senha.');
       
-      // Limpa campos
+      // Limpar URL
+      window.history.replaceState({}, document.title, '/');
+      
+      // Limpar campos
       setNovaSenhaRedefinir('');
       setConfirmarNovaSenhaRedefinir('');
       setOobCode('');
       
-      // Limpa URL
-      window.history.replaceState({}, document.title, '/');
-      
-      // Volta para login
+      // Voltar para login
       setScreen(Screen.LOGIN);
       
     } catch (error: any) {
-      console.error('Erro ao redefinir senha:', error);
+      console.error('❌ Erro ao redefinir senha:', error);
       
-      if (error.code === 'auth/invalid-action-code') {
-        alert('❌ Link expirado ou já foi usado.\n\nSolicite um novo link de recuperação.');
-        window.history.replaceState({}, document.title, '/');
-        setScreen(Screen.LOGIN);
-      } else if (error.code === 'auth/weak-password') {
-        alert('❌ Senha muito fraca.\n\nUse pelo menos 6 caracteres.');
+      if (error.code === 'auth/expired-action-code') {
+        alert('❌ Link expirado! Solicite um novo link.');
+      } else if (error.code === 'auth/invalid-action-code') {
+        alert('❌ Link inválido! Solicite um novo link.');
       } else {
-        alert('❌ Erro ao salvar nova senha.\n\nTente novamente.');
+        alert('❌ Erro: ' + error.message);
       }
     }
   };
@@ -3490,7 +3512,14 @@ const App: React.FC = () => {
     
     try {
       const emailLower = emailRecuperacao.toLowerCase().trim();
-      await sendPasswordResetEmail(auth, emailLower);
+      
+      // Configurações para o link de recuperação apontar de volta para o app
+      const actionCodeSettings = {
+        url: window.location.origin,
+        handleCodeInApp: true,
+      };
+      
+      await sendPasswordResetEmail(auth, emailLower, actionCodeSettings);
       
       // Limpa o campo e volta para login
       setEmailRecuperacao('');
@@ -3594,61 +3623,135 @@ const App: React.FC = () => {
         );
       case Screen.REDEFINIR_SENHA:
         return (
-          <div className="min-h-screen flex flex-col items-center justify-center bg-white p-6">
-            <div className="w-full max-w-md space-y-8">
-              <AppLogo size="md" />
+          <div style={{
+            minHeight: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            padding: '20px'
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '20px',
+              padding: '40px',
+              maxWidth: '450px',
+              width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+            }}>
+              
+              <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+                <h1 style={{
+                  fontSize: '36px',
+                  fontWeight: 'bold',
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent'
+                }}>
+                  PANDORA AI
+                </h1>
+                <p style={{ color: '#666', fontSize: '14px' }}>
+                  TRANSFORME SEU ESTILO COM IA
+                </p>
+              </div>
 
-              <div className="space-y-6">
-                <Input
-                  label="NOVA SENHA"
-                  type="password"
-                  placeholder="••••••••"
-                  value={novaSenhaRedefinir}
-                  onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
-                  icon={<Lock size={20} />}
-                />
+              <h2 style={{
+                fontSize: '24px',
+                fontWeight: 'bold',
+                textAlign: 'center',
+                marginBottom: '30px'
+              }}>
+                Redefinir Senha
+              </h2>
 
-                <Input
-                  label="REPETIR SENHA"
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmarNovaSenhaRedefinir}
-                  onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
-                  icon={<Lock size={20} />}
-                />
-
-                {confirmarNovaSenhaRedefinir && novaSenhaRedefinir !== confirmarNovaSenhaRedefinir && (
-                  <p className="text-red-500 text-xs font-semibold ml-1 animate-fade-in">
-                    ⚠️ As senhas não coincidem
-                  </p>
-                )}
-
-                <Button
-                  onClick={handleSalvarNovaSenha}
-                  disabled={
-                    !novaSenhaRedefinir || 
-                    !confirmarNovaSenhaRedefinir ||
-                    novaSenhaRedefinir !== confirmarNovaSenhaRedefinir ||
-                    novaSenhaRedefinir.length < 6
-                  }
-                >
-                  Confirmar
-                </Button>
-
-                <div className="text-center">
-                  <button 
-                    onClick={() => {
-                      setNovaSenhaRedefinir('');
-                      setConfirmarNovaSenhaRedefinir('');
-                      setOobCode('');
-                      window.history.replaceState({}, document.title, '/');
-                      setScreen(Screen.LOGIN);
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* Nova Senha */}
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontWeight: '600',
+                    fontSize: '14px'
+                  }}>
+                    NOVA SENHA
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Mínimo 6 caracteres"
+                    value={novaSenhaRedefinir}
+                    onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      borderRadius: '12px',
+                      border: '2px solid #e0e0e0',
+                      fontSize: '16px'
                     }}
-                    className="text-[#8B2CF5] hover:text-[#F52C99] transition-colors text-sm font-semibold"
-                  >
-                    ← Voltar para Login
-                  </button>
+                  />
                 </div>
+
+                {/* Confirmar Senha */}
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontWeight: '600',
+                    fontSize: '14px'
+                  }}>
+                    CONFIRMAR SENHA
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Digite novamente"
+                    value={confirmarNovaSenhaRedefinir}
+                    onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      borderRadius: '12px',
+                      border: '2px solid #e0e0e0',
+                      fontSize: '16px'
+                    }}
+                  />
+                </div>
+
+                {/* Botão Salvar */}
+                <button
+                  onClick={handleSalvarNovaSenha}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    borderRadius: '12px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    marginTop: '10px'
+                  }}
+                >
+                  Salvar Nova Senha
+                </button>
+
+                {/* Voltar */}
+                <button
+                  onClick={() => {
+                    window.history.replaceState({}, document.title, '/');
+                    setScreen(Screen.LOGIN);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#667eea',
+                    fontSize: '14px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ← Voltar para login
+                </button>
+
               </div>
             </div>
           </div>
