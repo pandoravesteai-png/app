@@ -8,6 +8,7 @@ import { doc, updateDoc, getDoc, setDoc, serverTimestamp } from 'firebase/firest
 import { db, auth, handleFirestoreError, OperationType } from './services/firebase';
 import { 
   signOut, 
+  onAuthStateChanged,
   signInWithPopup, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -3120,6 +3121,42 @@ const App: React.FC = () => {
     lastPurchaseCredits: null,
     lastPurchaseDate: null
   });
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user && user.email) {
+        const userEmail = user.email.toLowerCase().trim();
+        setUserId(userEmail);
+
+        try {
+          const userRef = doc(db, 'users', userEmail);
+          const userSnap = await getDoc(userRef);
+
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            setUserState(prev => ({
+              ...prev,
+              email: userEmail,
+              credits: userData.credits ?? 0,
+              name: userData.nome || userData.name || '',
+              lastPlan: userData.lastPurchasePlan || userData.lastPlan || null,
+            }));
+
+            // Só redireciona se estiver na tela de login ou splash
+            setScreen(prev => 
+              prev === Screen.SPLASH || prev === Screen.LOGIN 
+                ? Screen.ONBOARDING 
+                : prev
+            );
+          }
+        } catch (error) {
+          console.error('Erro ao recuperar sessão:', error);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     console.log('🔍 Verificando URL...');
