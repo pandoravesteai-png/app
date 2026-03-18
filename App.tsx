@@ -1736,7 +1736,7 @@ const getBannerConfig = (credits: number) => {
   if (credits === 0) {
     return {
       level: 6,
-      background: 'linear-gradient(135deg, #1a1a2e, #3d0066, #1a1a2e, #3d0066)',
+      backgroundImage: 'linear-gradient(135deg, #1a1a2e, #3d0066, #1a1a2e, #3d0066)',
       backgroundSize: '400% 400%',
       icon: '🚫',
       title: 'Seus créditos acabaram',
@@ -1759,7 +1759,7 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 10) {
     return {
       level: 5,
-      background: 'linear-gradient(135deg, #DC143C, #8B0000, #DC143C)',
+      backgroundImage: 'linear-gradient(135deg, #DC143C, #8B0000, #DC143C)',
       backgroundSize: '200% 200%',
       icon: '🔥',
       title: 'Só 10 créditos restantes!',
@@ -1782,7 +1782,7 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 20) {
     return {
       level: 4,
-      background: 'linear-gradient(135deg, #FF7F50, #FF6347, #FF7F50)',
+      backgroundImage: 'linear-gradient(135deg, #FF7F50, #FF6347, #FF7F50)',
       backgroundSize: '200% 200%',
       icon: '🔥',
       title: 'Apenas 20 créditos!',
@@ -1803,7 +1803,7 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 30) {
     return {
       level: 3,
-      background: 'linear-gradient(135deg, #FF9F0A, #FF8C00, #FF9F0A)',
+      backgroundImage: 'linear-gradient(135deg, #FF9F0A, #FF8C00, #FF9F0A)',
       backgroundSize: '200% 200%',
       icon: '⚡',
       title: '30 créditos restantes',
@@ -1824,7 +1824,7 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 40) {
     return {
       level: 2,
-      background: 'linear-gradient(135deg, #FFD93D, #FFA500, #FFD93D)',
+      backgroundImage: 'linear-gradient(135deg, #FFD93D, #FFA500, #FFD93D)',
       backgroundSize: '200% 200%',
       icon: '⚡',
       title: '40 créditos restantes',
@@ -1844,7 +1844,7 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 50) {
     return {
       level: 1,
-      background: 'linear-gradient(135deg, #FFE17B, #FFCD3C, #FFE17B)',
+      backgroundImage: 'linear-gradient(135deg, #FFE17B, #FFCD3C, #FFE17B)',
       backgroundSize: '200% 200%',
       icon: '✨',
       title: '50 créditos restantes',
@@ -1872,8 +1872,8 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
     <div 
       className={`w-full my-4 px-6 py-5 flex flex-col sm:flex-row items-center gap-4 transition-all duration-500 relative overflow-hidden ${config.shadow}`}
       style={{ 
-        background: config.background,
-        backgroundSize: '200% 200%',
+        backgroundImage: config.backgroundImage,
+        backgroundSize: config.backgroundSize,
         animation: `${config.bgAnimation}, slideInDownDrammatic 0.5s ease-out, ${config.shadowAnimation}`,
         willChange: 'transform, background-position, box-shadow'
       }}
@@ -1882,7 +1882,7 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
       <div 
         className="absolute inset-0 pointer-events-none"
         style={{
-          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
+          backgroundImage: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
           animation: `shimmer ${config.shimmerDuration} infinite`,
         }}
       />
@@ -2839,9 +2839,17 @@ const ResultScreen: React.FC<{
     <div className="w-full h-full min-h-screen bg-white flex flex-col animate-fade-in overflow-y-auto relative">
       {/* Image Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setShowImageModal(null)}>
-           <img src={showImageModal} className="max-w-full max-h-full rounded-lg" alt="Preview" />
-           <button className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full backdrop-blur-md">
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+           <img 
+             src={showImageModal} 
+             className="max-w-full max-h-full rounded-lg" 
+             alt="Preview"
+             style={{ touchAction: 'pinch-zoom' }}
+           />
+           <button 
+             onClick={() => setShowImageModal(null)}
+             className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full backdrop-blur-md z-10"
+           >
              <X size={24} />
            </button>
         </div>
@@ -2883,10 +2891,6 @@ const ResultScreen: React.FC<{
                     onTouchStart={handleTouchStart}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleMouseUp}
-                    onWheel={(e) => {
-                        const delta = e.deltaY * -0.001;
-                        setZoomLevel(prev => Math.min(Math.max(prev + delta, 1), 4));
-                    }}
                 >
                     {generatedImage ? (
                         <img 
@@ -2895,6 +2899,7 @@ const ResultScreen: React.FC<{
                             className="w-full h-full object-cover transition-transform duration-75 ease-linear" 
                             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`, transformOrigin: 'center center' }}
                             draggable={false}
+                            onDoubleClick={() => setShowImageModal(generatedImage)}
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
