@@ -3021,7 +3021,7 @@ const App: React.FC = () => {
   }, []);
 
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
+  const [screen, setScreen] = useState<Screen>(Screen.REDEFINIR_SENHA); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
   const [userId, setUserId] = useState<string>('');
@@ -3550,367 +3550,106 @@ const App: React.FC = () => {
         );
       case Screen.RECUPERAR_SENHA:
         return (
-          <div style={{
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'white',
-            padding: '20px'
-          }}>
-            
-            <div className="mb-4 w-full flex justify-center">
+          <div className="min-h-screen flex flex-col items-center justify-center bg-white p-6">
+            <div className="w-full max-w-md space-y-8">
               <AppLogo size="md" />
-            </div>
 
-            {/* Card Branco */}
-            <div style={{
-              width: '100%',
-              maxWidth: '400px',
-              background: 'white',
-              padding: '0'
-            }}>
-              
-              <h2 style={{
-                fontSize: '24px',
-                fontWeight: '700',
-                marginBottom: '30px',
-                textAlign: 'center',
-                color: '#1f2937'
-              }}>
-                Recuperar Senha
-              </h2>
+              <div className="space-y-6">
+                <div className="text-center">
+                  <h2 className="text-2xl font-bold text-gray-900">Recuperar Senha</h2>
+                  <p className="text-gray-500 text-sm mt-2">Enviaremos um link para o seu e-mail</p>
+                </div>
 
-              {/* Campo Email */}
-              <div style={{marginBottom: '20px'}}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  color: '#374151',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  EMAIL
-                </label>
-                <div style={{position: 'relative'}}>
-                  <span style={{
-                    position: 'absolute',
-                    left: '15px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontSize: '20px'
-                  }}>
-                    📧
-                  </span>
-                  <input 
-                    type="email"
-                    value={emailRecuperacao}
-                    onChange={(e) => setEmailRecuperacao(e.target.value)}
-                    placeholder="seu@email.com"
-                    autoComplete="email"
-                    style={{
-                      width: '100%',
-                      padding: '16px 16px 16px 50px',
-                      fontSize: '16px',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '12px',
-                      outline: 'none',
-                      transition: 'all 0.3s',
-                      boxSizing: 'border-box',
-                      backgroundColor: '#f9fafb'
+                <Input
+                  label="EMAIL"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={emailRecuperacao}
+                  onChange={(e) => setEmailRecuperacao(e.target.value)}
+                  icon={<Mail size={20} />}
+                  autoComplete="email"
+                />
+
+                <Button
+                  onClick={handleEnviarLinkRecuperacao}
+                  disabled={!emailRecuperacao || !emailRecuperacao.includes('@')}
+                >
+                  Enviar Link de Recuperação
+                </Button>
+
+                <div className="text-center">
+                  <button 
+                    onClick={() => {
+                      setEmailRecuperacao('');
+                      setScreen(Screen.LOGIN);
                     }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#a855f7';
-                      e.target.style.backgroundColor = 'white';
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#e5e7eb';
-                      e.target.style.backgroundColor = '#f9fafb';
-                    }}
-                  />
+                    className="text-[#8B2CF5] hover:text-[#F52C99] transition-colors text-sm font-semibold"
+                  >
+                    ← Voltar para Login
+                  </button>
                 </div>
               </div>
-
-              {/* Botão Enviar - ESTILO PANDORA */}
-              <button 
-                onClick={handleEnviarLinkRecuperacao}
-                disabled={!emailRecuperacao || !emailRecuperacao.includes('@')}
-                style={{
-                  width: '100%',
-                  padding: '18px',
-                  fontSize: '16px',
-                  fontWeight: '700',
-                  color: 'white',
-                  background: (emailRecuperacao && emailRecuperacao.includes('@'))
-                    ? 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)'
-                    : '#d1d5db',
-                  border: 'none',
-                  borderRadius: '50px',
-                  cursor: (emailRecuperacao && emailRecuperacao.includes('@')) ? 'pointer' : 'not-allowed',
-                  marginBottom: '20px',
-                  transition: 'all 0.3s',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  boxShadow: (emailRecuperacao && emailRecuperacao.includes('@')) 
-                    ? '0 4px 15px rgba(168, 85, 247, 0.4)' 
-                    : 'none'
-                }}
-                onMouseOver={(e) => {
-                  if (emailRecuperacao && emailRecuperacao.includes('@')) {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(168, 85, 247, 0.5)';
-                  }
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = (emailRecuperacao && emailRecuperacao.includes('@'))
-                    ? '0 4px 15px rgba(168, 85, 247, 0.4)'
-                    : 'none';
-                }}
-              >
-                Enviar Link de Recuperação
-              </button>
-
-              {/* Link Voltar */}
-              <div style={{textAlign: 'center'}}>
-                <a 
-                  onClick={() => {
-                    setEmailRecuperacao('');
-                    setScreen(Screen.LOGIN);
-                  }}
-                  style={{
-                    color: '#8B2CF5',
-                    cursor: 'pointer',
-                    textDecoration: 'none',
-                    fontSize: '15px',
-                    fontWeight: '500'
-                  }}
-                >
-                  ← Voltar para Login
-                </a>
-              </div>
-
             </div>
           </div>
         );
       case Screen.REDEFINIR_SENHA:
         return (
-          <div style={{
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'white',
-            padding: '20px'
-          }}>
-            
-            <div className="mb-4 w-full flex justify-center">
+          <div className="min-h-screen flex flex-col items-center justify-center bg-white p-6">
+            <div className="w-full max-w-md space-y-8">
               <AppLogo size="md" />
-            </div>
 
-            <div style={{
-              width: '100%',
-              maxWidth: '400px',
-              background: 'white',
-              padding: '0'
-            }}>
-              
-              <h2 style={{
-                fontSize: '24px',
-                fontWeight: '700',
-                marginBottom: '10px',
-                textAlign: 'center',
-                color: '#1f2937'
-              }}>
-                Redefinir Senha
-              </h2>
-              
-              <p style={{
-                color: '#6b7280',
-                fontSize: '14px',
-                textAlign: 'center',
-                marginBottom: '30px'
-              }}>
-                Digite sua nova senha abaixo.
-              </p>
+              <div className="space-y-6">
+                <Input
+                  label="NOVA SENHA"
+                  type="password"
+                  placeholder="••••••••"
+                  value={novaSenhaRedefinir}
+                  onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
+                  icon={<Lock size={20} />}
+                />
 
-              {/* Campo Nova Senha */}
-              <div style={{marginBottom: '20px'}}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  color: '#374151',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  NOVA SENHA
-                </label>
-                <div style={{position: 'relative'}}>
-                  <span style={{
-                    position: 'absolute',
-                    left: '15px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontSize: '20px'
-                  }}>
-                    🔒
-                  </span>
-                  <input 
-                    type="password"
-                    value={novaSenhaRedefinir}
-                    onChange={(e) => setNovaSenhaRedefinir(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
-                    style={{
-                      width: '100%',
-                      padding: '16px 16px 16px 50px',
-                      fontSize: '16px',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '12px',
-                      outline: 'none',
-                      transition: 'all 0.3s',
-                      boxSizing: 'border-box',
-                      backgroundColor: '#f9fafb'
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#a855f7';
-                      e.target.style.backgroundColor = 'white';
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#e5e7eb';
-                      e.target.style.backgroundColor = '#f9fafb';
-                    }}
-                  />
-                </div>
-              </div>
+                <Input
+                  label="REPETIR SENHA"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmarNovaSenhaRedefinir}
+                  onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
+                  icon={<Lock size={20} />}
+                />
 
-              {/* Campo Confirmar Senha */}
-              <div style={{marginBottom: '25px'}}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  color: '#374151',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  CONFIRMAR SENHA
-                </label>
-                <div style={{position: 'relative'}}>
-                  <span style={{
-                    position: 'absolute',
-                    left: '15px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontSize: '20px'
-                  }}>
-                    🔐
-                  </span>
-                  <input 
-                    type="password"
-                    value={confirmarNovaSenhaRedefinir}
-                    onChange={(e) => setConfirmarNovaSenhaRedefinir(e.target.value)}
-                    placeholder="Digite a senha novamente"
-                    style={{
-                      width: '100%',
-                      padding: '16px 16px 16px 50px',
-                      fontSize: '16px',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '12px',
-                      outline: 'none',
-                      transition: 'all 0.3s',
-                      boxSizing: 'border-box',
-                      backgroundColor: '#f9fafb'
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#a855f7';
-                      e.target.style.backgroundColor = 'white';
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#e5e7eb';
-                      e.target.style.backgroundColor = '#f9fafb';
-                    }}
-                  />
-                </div>
                 {confirmarNovaSenhaRedefinir && novaSenhaRedefinir !== confirmarNovaSenhaRedefinir && (
-                  <p style={{color: '#ef4444', fontSize: '13px', marginTop: '8px', textAlign: 'left'}}>
+                  <p className="text-red-500 text-xs font-semibold ml-1 animate-fade-in">
                     ⚠️ As senhas não coincidem
                   </p>
                 )}
-              </div>
 
-              {/* Botão Salvar */}
-              <button 
-                onClick={handleSalvarNovaSenha}
-                disabled={
-                  !novaSenhaRedefinir || 
-                  !confirmarNovaSenhaRedefinir ||
-                  novaSenhaRedefinir !== confirmarNovaSenhaRedefinir ||
-                  novaSenhaRedefinir.length < 6
-                }
-                style={{
-                  width: '100%',
-                  padding: '18px',
-                  fontSize: '16px',
-                  fontWeight: '700',
-                  color: 'white',
-                  background: (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6)
-                    ? 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)'
-                    : '#d1d5db',
-                  border: 'none',
-                  borderRadius: '50px',
-                  cursor: (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6) ? 'pointer' : 'not-allowed',
-                  transition: 'all 0.3s',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  boxShadow: (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6) 
-                    ? '0 4px 15px rgba(168, 85, 247, 0.4)' 
-                    : 'none'
-                }}
-                onMouseOver={(e) => {
-                  if (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6) {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(168, 85, 247, 0.5)';
+                <Button
+                  onClick={handleSalvarNovaSenha}
+                  disabled={
+                    !novaSenhaRedefinir || 
+                    !confirmarNovaSenhaRedefinir ||
+                    novaSenhaRedefinir !== confirmarNovaSenhaRedefinir ||
+                    novaSenhaRedefinir.length < 6
                   }
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = (novaSenhaRedefinir && confirmarNovaSenhaRedefinir && novaSenhaRedefinir === confirmarNovaSenhaRedefinir && novaSenhaRedefinir.length >= 6)
-                    ? '0 4px 15px rgba(168, 85, 247, 0.4)'
-                    : 'none';
-                }}
-              >
-                Salvar Nova Senha
-              </button>
-              
-              {/* Link Voltar */}
-              <div style={{textAlign: 'center', marginTop: '20px'}}>
-                <a 
-                  onClick={() => {
-                    setNovaSenhaRedefinir('');
-                    setConfirmarNovaSenhaRedefinir('');
-                    setOobCode('');
-                    window.history.replaceState({}, document.title, '/');
-                    setScreen(Screen.LOGIN);
-                  }}
-                  style={{
-                    color: '#8B2CF5',
-                    cursor: 'pointer',
-                    textDecoration: 'none',
-                    fontSize: '15px',
-                    fontWeight: '500'
-                  }}
                 >
-                  ← Voltar para Login
-                </a>
-              </div>
+                  Confirmar
+                </Button>
 
+                <div className="text-center">
+                  <button 
+                    onClick={() => {
+                      setNovaSenhaRedefinir('');
+                      setConfirmarNovaSenhaRedefinir('');
+                      setOobCode('');
+                      window.history.replaceState({}, document.title, '/');
+                      setScreen(Screen.LOGIN);
+                    }}
+                    className="text-[#8B2CF5] hover:text-[#F52C99] transition-colors text-sm font-semibold"
+                  >
+                    ← Voltar para Login
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         );
