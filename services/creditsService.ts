@@ -42,14 +42,14 @@ export const saveUserEmail = async (userId: string, email: string): Promise<void
   }
 };
 
-export const deductCredit = async (userId: string): Promise<boolean> => {
+export const deductCredit = async (userId: string, amount: number = 10): Promise<boolean> => {
   const userRef = doc(db, 'users', userId);
   try {
     const userSnap = await getDoc(userRef);
     
-    if (!userSnap.exists() || userSnap.data().credits <= 0) return false;
+    if (!userSnap.exists() || (userSnap.data().credits || 0) < amount) return false;
     
-    await updateDoc(userRef, { credits: increment(-1) });
+    await updateDoc(userRef, { credits: increment(-amount) });
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);

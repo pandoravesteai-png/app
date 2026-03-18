@@ -3355,14 +3355,13 @@ const App: React.FC = () => {
 
   const handleGenerateLook = async (clothingImageUrl: string) => {
     // Verifica se tem créditos ANTES de gerar
-    if (userState.credits <= 0) {
-      alert('❌ Você não tem créditos! Recarregue agora para continuar criando looks incríveis.');
+    if (userState.credits < 10) {
       setScreen(Screen.CREDITS);
       return;
     }
 
-    // Desconta 1 crédito ANTES de gerar
-    const ok = await deductCredit(userId);
+    // Desconta 10 créditos ANTES de gerar
+    const ok = await deductCredit(userId, 10);
     if (!ok) {
       alert('Erro ao processar. Tente novamente.');
       setScreen(Screen.CREDITS);
