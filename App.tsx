@@ -2342,6 +2342,10 @@ const FinalizeScreen: React.FC<{
 }> = ({ category, userImage, onGenerate, onRestart, onBack, loading }) => {
   const [clothingImage, setClothingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showGifGuide, setShowGifGuide] = useState(false);
+  const [gifGuiaVisto, setGifGuiaVisto] = useState(() => {
+    return localStorage.getItem('gif_guia_visto') === 'true';
+  });
 
   const getScreenTexts = (categoryId: string) => {
     switch (categoryId) {
@@ -2387,7 +2391,19 @@ const FinalizeScreen: React.FC<{
         </div>
 
         <div className="flex flex-col gap-2 w-full">
-             <span className="text-xs font-bold text-gray-400 uppercase tracking-widest text-left pl-1">{texts.label}</span>
+            <div className="flex justify-between items-center pl-1 pr-1">
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{texts.label}</span>
+              <button
+                onClick={() => setShowGifGuide(true)}
+                className={`flex items-center gap-1 text-[10px] font-bold uppercase transition-all
+                  ${!gifGuiaVisto
+                    ? 'text-white bg-purple-600 px-3 py-1.5 rounded-full animate-pulse shadow-lg shadow-purple-300'
+                    : 'text-purple-600 hover:underline'
+                  }`}
+              >
+                🎬 Guia de Peça
+              </button>
+            </div>
              <div onClick={triggerUpload} className="border-2 border-dashed border-gray-200 bg-white rounded-2xl p-6 flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-purple-50 transition-colors group relative overflow-hidden h-48">
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg, image/webp" onChange={handleFileChange} />
                 {clothingImage ? (
@@ -2427,22 +2443,62 @@ const FinalizeScreen: React.FC<{
             </div>
         )}
 
-        {/* Recommendation Section */}
-        <div className="mt-6 bg-purple-50 border border-purple-100 rounded-2xl p-4 flex gap-3 items-start">
-            <div className="bg-white p-1.5 rounded-full shadow-sm text-purple-600 mt-0.5">
-                <Sparkles size={14} />
-            </div>
-            <div>
-                <h4 className="text-xs font-bold text-purple-800 uppercase mb-1">Dica para um resultado perfeito</h4>
-                <p className="text-[11px] text-purple-700 leading-relaxed">
-                    Envie uma imagem da peça sozinha (sem ninguém vestindo), com boa iluminação e fundo neutro (preferencialmente branco ou cor sólida). Isso ajuda a IA a identificar os detalhes com precisão.
-                </p>
-            </div>
-        </div>
 
         <div className="flex-1 flex flex-col justify-end mt-4 mb-2">
            <PromoCarousel />
         </div>
+
+        {/* Modal Guia de Peça */}
+        {showGifGuide && (
+          <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 animate-fade-in">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl relative">
+              <button onClick={() => setShowGifGuide(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+              <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <Sparkles className="text-purple-600" size={20} /> Guia de Peça Perfeita
+              </h3>
+              
+              <div className="space-y-4">
+                <div className="aspect-video bg-gray-100 rounded-2xl flex items-center justify-center overflow-hidden border border-gray-100">
+                <img 
+                  src="https://i.postimg.cc/yxjyGXLW/202603181804-ezgif-com-video-to-gif-converter.gif"
+                  alt="Exemplo de peça de roupa"
+                  className="w-full rounded-xl object-cover"
+                  style={{ maxHeight: '250px', objectFit: 'cover' }}
+                />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex gap-3 items-start">
+                    <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Check size={12} className="text-green-600" />
+                    </div>
+                    <p className="text-sm text-gray-600">Peça sozinha, sem ninguém vestindo.</p>
+                  </div>
+                  <div className="flex gap-3 items-start">
+                    <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Check size={12} className="text-green-600" />
+                    </div>
+                    <p className="text-sm text-gray-600">Fundo neutro (branco ou cor sólida).</p>
+                  </div>
+                  <div className="flex gap-3 items-start">
+                    <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Check size={12} className="text-green-600" />
+                    </div>
+                    <p className="text-sm text-gray-600">Boa iluminação, sem sombras fortes.</p>
+                  </div>
+                </div>
+              </div>
+              
+              <Button onClick={() => {
+                setShowGifGuide(false);
+                setGifGuiaVisto(true);
+                localStorage.setItem('gif_guia_visto', 'true');
+              }} className="mt-6">Entendi!</Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-8 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] w-full sticky bottom-0 z-30">
