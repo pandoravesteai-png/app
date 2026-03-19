@@ -2,49 +2,29 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && (
-        request.auth.uid == userId || 
-        (request.auth.token.email != null && request.auth.token.email.lower() == userId.lower())
-      );
-    }
-
+    // Usuário acessa apenas seu próprio documento
     match /users/{userId} {
-      // Allow read even if document doesn't exist, as long as the ID matches the user's identity
-      // This is crucial for getDoc() calls on new users
-      allow read: if isOwner(userId) || (isAuthenticated() && resource == null && request.auth.token.email.lower() == userId.lower());
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == userId || 
+         request.auth.token.email == userId);
       
-      // Allow create if the user is the owner (by UID or email)
-      // We also check that the data being written matches the user's email
-      allow create: if isOwner(userId) || (isAuthenticated() && request.resource.data.email.lower() == request.auth.token.email.lower());
-      
-      // Allow update if the user is the owner
-      allow update: if isOwner(userId);
-      
-      // Allow delete if the user is the owner
-      allow delete: if isOwner(userId);
-      
+      // Subcoleções do usuário
       match /{subcollection}/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if request.auth != null && 
+          (request.auth.uid == userId || 
+           request.auth.token.email == userId);
       }
     }
     
+    // Avaliações — qualquer usuário logado pode criar
     match /avaliacoes/{docId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
     }
     
+    // Histórico de looks
     match /historico/{docId} {
-      allow read, write: if isAuthenticated();
-    }
-    
-    // Default deny
-    match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if request.auth != null;
     }
   }
 }
