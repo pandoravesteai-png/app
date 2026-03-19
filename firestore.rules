@@ -1,22 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId} (Firebase Auth UID)
-    // Fields:
-    //   - credits: number (required) - Number of credits available
-    //   - createdAt: string (required) - ISO 8601 timestamp
-    //   - role: string (optional) - User role (admin, user)
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
     
     function isAuthenticated() {
       return request.auth != null;
@@ -29,73 +13,38 @@ service cloud.firestore {
       );
     }
 
-    function isAdmin() {
-      return isAuthenticated() &&
-        (request.auth.token.email != null && request.auth.token.email.lower() == "pandoravesteai@gmail.com");
-    }
-
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidUser(data) {
-      return (!('credits' in data) || data.credits is number) &&
-             (!('createdAt' in data) || data.createdAt is string) &&
-             (!('email' in data) || data.email is string) &&
-             (!('name' in data) || data.name is string) &&
-             (!('nome' in data) || data.nome is string) &&
-             (!('lastPlan' in data) || data.lastPlan is string || data.lastPlan == null) &&
-             (!('lastPurchasePlan' in data) || data.lastPurchasePlan is string || data.lastPurchasePlan == null) &&
-             (!('lastPurchaseCredits' in data) || data.lastPurchaseCredits is number) &&
-             (!('lastPurchaseAmount' in data) || data.lastPurchaseAmount is number) &&
-             (!('lastPurchaseDate' in data) || data.lastPurchaseDate is string || data.lastPurchaseDate is timestamp) &&
-             (!('profileImage' in data) || data.profileImage is string || data.profileImage == null) &&
-             (!('fcmToken' in data) || data.fcmToken is string) &&
-             (!('role' in data) || data.role in ['admin', 'user']);
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
     match /users/{userId} {
-      // Allow read if the user is the owner (by UID or email), if the document doesn't exist (to allow checking), or if an admin
-      allow read: if isAuthenticated() && (
-        isOwner(userId) || 
-        resource == null ||
-        (resource != null && 'email' in resource.data && request.auth.token.email == resource.data.email) || 
-        isAdmin()
-      );
+      // Allow read even if document doesn't exist, as long as the ID matches the user's identity
+      // This is crucial for getDoc() calls on new users
+      allow read: if isOwner(userId) || (isAuthenticated() && resource == null && request.auth.token.email.lower() == userId.lower());
       
-      // Allow create if the user is setting their own UID or their own email
-      allow create: if isAuthenticated() && 
-                      (
-                        isOwner(userId) || 
-                        (request.resource.data.email == request.auth.token.email)
-                      ) &&
-                      isValidUser(request.resource.data) &&
-                      request.resource.data.credits == 1 &&
-                      (!('role' in request.resource.data) || request.resource.data.role == 'user');
-                      
-      // Allow update if the user is the owner (by UID or email), or if they are setting their own email on an unowned doc
-      allow update: if isAuthenticated() && 
-                      (
-                        isOwner(userId) || 
-                        (resource != null && 'email' in resource.data && resource.data.email == request.auth.token.email) || 
-                        (request.resource.data.email == request.auth.token.email) ||
-                        isAdmin()
-                      ) && 
-                      isValidUser(request.resource.data) &&
-                      (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt) &&
-                      (isAdmin() || !('role' in resource.data) || request.resource.data.role == resource.data.role);
-
-      match /history/{historyId} {
+      // Allow create if the user is the owner (by UID or email)
+      // We also check that the data being written matches the user's email
+      allow create: if isOwner(userId) || (isAuthenticated() && request.resource.data.email.lower() == request.auth.token.email.lower());
+      
+      // Allow update if the user is the owner
+      allow update: if isOwner(userId);
+      
+      // Allow delete if the user is the owner
+      allow delete: if isOwner(userId);
+      
+      match /{subcollection}/{docId} {
         allow read, write: if isOwner(userId);
       }
+    }
+    
+    match /avaliacoes/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+    
+    match /historico/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

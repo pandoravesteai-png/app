@@ -3627,6 +3627,9 @@ const App: React.FC = () => {
         } catch (error) {
           console.error('Erro ao recuperar sessão:', error);
         }
+      } else {
+        // usuário deslogado
+        setUserId('');
       }
     });
 
@@ -4253,35 +4256,33 @@ const App: React.FC = () => {
 
   const compartilharWhatsApp = async () => {
     try {
-      // Tenta compartilhar com a imagem
-      // usando Web Share API
       const imagemGerada = userState.generatedImage;
       if (!imagemGerada) return;
 
       const response = await fetch(imagemGerada);
       const blob = await response.blob();
       const file = new File(
-        [blob], 
-        'meu-look-pandora.jpg', 
+        [blob],
+        'meu-look-pandora.jpg',
         { type: 'image/jpeg' }
       );
+
+      const texto = 
+        'Olha como ficou meu novo look com o ' +
+        'Pandora AI! 🔥✨ Experimente você ' +
+        'também: https://pandoravesteai.com';
 
       if (
         navigator.canShare && 
         navigator.canShare({ files: [file] })
       ) {
-        // Compartilha com foto (funciona no 
-        // celular Android e iOS)
         await navigator.share({
           files: [file],
-          text: 'Olha como ficou meu novo look ' +
-                'com o Pandora AI! 🔥✨ ' +
-                'Experimente você também: ' +
-                'https://pandoravesteai.com'
+          title: 'Pandora AI',
+          text: texto
         });
       } else {
-        // Fallback desktop: baixa a imagem
-        // e abre WhatsApp com texto
+        // Fallback: baixa foto + abre WhatsApp
         const link = document.createElement('a');
         link.href = imagemGerada;
         link.download = 'meu-look-pandora.jpg';
@@ -4290,22 +4291,16 @@ const App: React.FC = () => {
         document.body.removeChild(link);
 
         setTimeout(() => {
-          const texto = encodeURIComponent(
-            'Olha como ficou meu novo look com ' +
-            'o Pandora AI! 🔥✨ Experimente você ' +
-            'também: https://pandoravesteai.com'
-          );
           window.open(
-            `https://wa.me/?text=${texto}`,
+            `https://wa.me/?text=${encodeURIComponent(texto)}`,
             '_blank'
           );
         }, 1500);
       }
     } catch (error) {
-      console.error('Erro ao compartilhar:', error);
       const texto = encodeURIComponent(
-        'Olha como ficou meu novo look com ' +
-        'o Pandora AI! 🔥✨ Experimente você ' +
+        'Olha como ficou meu novo look com o ' +
+        'Pandora AI! 🔥✨ Experimente você ' +
         'também: https://pandoravesteai.com'
       );
       window.open(

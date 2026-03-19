@@ -2,12 +2,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.0.0/firebase-app-compat.js'
 importScripts('https://www.gstatic.com/firebasejs/10.0.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey: "AIzaSyC_sua_api_key",
+  apiKey: "AIzaSyCawb-KljzrsoDYkJRoA--JJo4TlSK9yc0",
   authDomain: "pandora-ai-7c070.firebaseapp.com",
   projectId: "pandora-ai-7c070",
-  storageBucket: "pandora-ai-7c070.appspot.com",
+  storageBucket: "pandora-ai-7c070.firebasestorage.app",
   messagingSenderId: "1014929216057",
-  appId: "1:1014929216057:web:00ffdc506d81313ea2b3e8"
+  appId: "1:1014929216057:web:a31819774acda4dca2b3e8"
 });
 
 const messaging = firebase.messaging();

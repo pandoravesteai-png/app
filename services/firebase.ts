@@ -1,21 +1,28 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User, deleteUser, signOut } from "firebase/auth";
+import { getAuth, setPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User, deleteUser, signOut } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
-// Import the Firebase configuration
-import firebaseConfig from "../firebase-applet-config.json";
+// Firebase configuration from environment variables or config file
+import firebaseConfig from '../firebase-applet-config.json';
+
+const config = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+};
 
 // Initialize Firebase
-export const app = initializeApp(firebaseConfig);
+console.log('🔥 Initializing Firebase with config:', JSON.stringify({ ...config, apiKey: '***' }));
+export const app = initializeApp(config);
 
-// Initialize Firestore with named database if provided, otherwise use default
-const databaseId = (firebaseConfig as any).firestoreDatabaseId;
-export const db = databaseId && databaseId !== '(default)' 
-  ? getFirestore(app, databaseId) 
-  : getFirestore(app);
+// Initialize Firestore
+export const db = getFirestore(app);
 
 export const storage = getStorage(app);
 export const functions = getFunctions(app, 'us-central1');
@@ -23,6 +30,17 @@ export { httpsCallable };
 
 const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 export const auth = getAuth(app);
+
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence)
+    .then(() => {
+      console.log('Persistência configurada');
+    })
+    .catch((error) => {
+      console.error('Erro na persistência:', error);
+    });
+}
+
 export const googleProvider = new GoogleAuthProvider();
 
 // --- Firestore Error Handling ---
@@ -167,7 +185,7 @@ export const requestNotificationPermission = async (
     if (permission !== 'granted') return null;
 
     const token = await getToken(messaging, {
-      vapidKey: 'BJndjYvNuqJZOELkq5MsHfNGtix4DRnnSAzkKBuS_p24Lc-VRCOH4AWLT4fWaLBUrTr7swIAYUoOWO9P6wuIo4Y'
+      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY
     });
 
     if (token && userId) {

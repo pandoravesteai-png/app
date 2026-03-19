@@ -10,10 +10,10 @@ export const getOrCreateUserCredits = async (userId: string): Promise<number> =>
       const email = auth.currentUser?.email || '';
       await setDoc(userRef, { 
         email,
-        credits: 1, 
+        credits: 10, 
         createdAt: new Date().toISOString() 
       });
-      return 1;
+      return 10;
     }
     
     return userSnap.data().credits || 0;
@@ -31,7 +31,7 @@ export const saveUserEmail = async (userId: string, email: string): Promise<void
     if (!userSnap.exists()) {
       await setDoc(userRef, { 
         email, 
-        credits: 1, 
+        credits: 10, 
         createdAt: new Date().toISOString() 
       });
     } else {
