@@ -5,7 +5,8 @@ import { AppLogo, Button, Input } from './components/UI';
 import { CATEGORIES, HOME_CAROUSEL_1, HOME_CAROUSEL_2 } from './constants';
 import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move } from 'lucide-react';
 import { doc, updateDoc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './services/firebase';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { db, auth, handleFirestoreError, OperationType, storage, functions, httpsCallable } from './services/firebase';
 import { 
   signOut, 
   onAuthStateChanged,
@@ -17,7 +18,7 @@ import {
   GoogleAuthProvider
 } from 'firebase/auth';
 import { generateFashionTip, generateTryOnLook, generate360View } from './services/geminiService';
-import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider } from './services/firebase';
+import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider, requestNotificationPermission } from './services/firebase';
 import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail } from './services/creditsService';
 import { createPixPayment } from './services/paymentService';
 
@@ -324,6 +325,58 @@ async function urlToBase64(url: string): Promise<string> {
     return "";
   }
 }
+
+const compressImage = (base64Str: string, maxWidth = 800, maxHeight = 800, quality = 0.7): Promise<string> => {
+  return new Promise((resolve) => {
+    if (!base64Str) {
+      resolve(base64Str);
+      return;
+    }
+
+    // Se for uma URL curta (não base64 e não blob), não precisa comprimir
+    if (base64Str.length < 1000 && !base64Str.startsWith('data:image') && !base64Str.startsWith('blob:')) {
+      resolve(base64Str);
+      return;
+    }
+
+    let src = base64Str;
+    if (!src.startsWith('data:image') && !src.startsWith('blob:')) {
+      // Assume que é uma string base64 sem prefixo
+      src = `data:image/jpeg;base64,${base64Str}`;
+    }
+
+    const img = new Image();
+    img.src = src;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width *= maxHeight / height;
+          height = maxHeight;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(base64Str);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(base64Str);
+  });
+};
 
 // --- Helper Components for Home Screen ---
 
@@ -1034,7 +1087,41 @@ const ProfileScreen: React.FC<{
     const [newName, setNewName] = useState(userState.name || '');
     const [image, setImage] = useState<string | null>(userState.profileImage || null);
     const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryItem | null>(null);
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedItems, setSelectedItems] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+    const handleDeleteSelected = async () => {
+      if (selectedItems.length === 0) return;
+      setShowDeleteModal(true);
+    };
+
+    const confirmarExclusao = async () => {
+      setShowDeleteModal(false);
+      try {
+        const { deleteDoc, doc: firestoreDoc } = await import('firebase/firestore');
+        
+        for (const id of selectedItems) {
+          try {
+            await deleteDoc(firestoreDoc(db, 'users', userId, 'history', id));
+            console.log('✅ Deletado:', id);
+          } catch (err) {
+            console.error('Erro ao deletar item:', id, err);
+          }
+        }
+        
+        setUserState(prev => ({
+          ...prev,
+          history: prev.history.filter(item => !selectedItems.includes(item.id))
+        }));
+        
+        setSelectedItems([]);
+        setSelectionMode(false);
+      } catch (error) {
+        console.error('Erro ao excluir:', error);
+      }
+    };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -1460,7 +1547,41 @@ const ProfileScreen: React.FC<{
                         <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                             <RefreshCw size={18} className="text-purple-600" /> Histórico
                         </h3>
-                        <span className="text-xs text-gray-400">{history.length} criações</span>
+                        <div className="flex items-center gap-2">
+                          {selectionMode ? (
+                            <>
+                              <span className="text-xs text-purple-600 font-bold">
+                                {selectedItems.length} selecionado(s)
+                              </span>
+                              {selectedItems.length > 0 && (
+                                <button
+                                  onClick={handleDeleteSelected}
+                                  className="flex items-center gap-1 bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-full"
+                                >
+                                  <Trash2 size={12} /> Excluir
+                                </button>
+                              )}
+                              <button
+                                onClick={() => { setSelectionMode(false); setSelectedItems([]); }}
+                                className="text-xs text-gray-500 font-bold px-3 py-1.5 rounded-full border border-gray-200"
+                              >
+                                Cancelar
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-xs text-gray-400">{history.length} criações</span>
+                              {history.length > 0 && (
+                                <button
+                                  onClick={() => setSelectionMode(true)}
+                                  className="text-xs text-purple-600 font-bold px-3 py-1.5 rounded-full border border-purple-200"
+                                >
+                                  Selecionar
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
                     </div>
 
                     {history.length === 0 ? (
@@ -1476,18 +1597,61 @@ const ProfileScreen: React.FC<{
                             {history.map((item) => (
                                 <button 
                                     key={item.id}
-                                    onClick={() => setSelectedHistoryItem(item)}
-                                    className="relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm border border-gray-100 group"
+                                    onClick={() => {
+                                      if (selectionMode) {
+                                        setSelectedItems(prev => 
+                                          prev.includes(item.id) 
+                                            ? prev.filter(id => id !== item.id)
+                                            : [...prev, item.id]
+                                        );
+                                      } else {
+                                        setSelectedHistoryItem(item);
+                                      }
+                                    }}
+                                    className={`relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm border-2 group transition-all
+                                      ${selectionMode && selectedItems.includes(item.id) 
+                                        ? 'border-purple-500 scale-95' 
+                                        : 'border-gray-100'
+                                      }`}
                                 >
-                                    <img src={item.generatedImage} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt="History" />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
-                                        <p className="text-white text-[10px] font-bold">
-                                            {new Date(item.date).toLocaleDateString()}
-                                        </p>
-                                        <p className="text-white/80 text-[10px]">
-                                            {item.type === 'TEXT' ? 'Via Texto' : 'Via Upload'}
-                                        </p>
-                                    </div>
+                                    <img 
+                                      src={item.generatedImage} 
+                                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                                      alt="History" 
+                                    />
+                                    
+                                    {/* Overlay seleção */}
+                                    {selectionMode && (
+                                      <div className={`absolute inset-0 flex items-center justify-center transition-all
+                                        ${selectedItems.includes(item.id) 
+                                          ? 'bg-purple-500/40' 
+                                          : 'bg-black/10'
+                                        }`}
+                                      >
+                                        <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center
+                                          ${selectedItems.includes(item.id) 
+                                            ? 'bg-purple-600 border-purple-600' 
+                                            : 'bg-white/80 border-gray-300'
+                                          }`}
+                                        >
+                                          {selectedItems.includes(item.id) && (
+                                            <Check size={14} className="text-white" />
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Overlay hover normal */}
+                                    {!selectionMode && (
+                                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
+                                          <p className="text-white text-[10px] font-bold">
+                                              {new Date(item.date).toLocaleDateString()}
+                                          </p>
+                                          <p className="text-white/80 text-[10px]">
+                                              {item.type === 'TEXT' ? 'Via Texto' : 'Via Upload'}
+                                          </p>
+                                      </div>
+                                    )}
                                 </button>
                             ))}
                         </div>
@@ -1650,6 +1814,73 @@ const ProfileScreen: React.FC<{
                         }
                       `}
                     </style>
+                  </div>
+                )}
+
+                {/* Modal de Confirmação de Exclusão */}
+                {showDeleteModal && (
+                  <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    padding: '20px'
+                  }}>
+                    <div style={{
+                      background: 'white',
+                      borderRadius: '20px',
+                      padding: '28px',
+                      maxWidth: '320px',
+                      width: '100%',
+                      textAlign: 'center',
+                    }}>
+                      <div style={{
+                        width: '56px',
+                        height: '56px',
+                        background: '#fee2e2',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        margin: '0 auto 16px',
+                        fontSize: '24px'
+                      }}>
+                        🗑️
+                      </div>
+                      <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+                        Excluir {selectedItems.length} imagem(ns)?
+                      </h3>
+                      <p style={{ fontSize: '13px', color: '#666', marginBottom: '24px' }}>
+                        Esta ação não pode ser desfeita.
+                      </p>
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button
+                          onClick={() => setShowDeleteModal(false)}
+                          style={{
+                            flex: 1, padding: '12px',
+                            background: '#f5f5f5', color: '#666',
+                            border: 'none', borderRadius: '12px',
+                            fontSize: '14px', fontWeight: '600',
+                            cursor: 'pointer'
+                          }}>
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={confirmarExclusao}
+                          style={{
+                            flex: 1, padding: '12px',
+                            background: '#ef4444', color: 'white',
+                            border: 'none', borderRadius: '12px',
+                            fontSize: '14px', fontWeight: '600',
+                            cursor: 'pointer'
+                          }}>
+                          Excluir
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
             </div>
@@ -2667,8 +2898,13 @@ const ResultScreen: React.FC<{
   onRestart: () => void;
   onView360: () => void;
   onBack: () => void;
-}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack }) => {
+  onShareWhatsApp: () => void;
+}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, onShareWhatsApp }) => {
   const [showImageModal, setShowImageModal] = useState<string | null>(null);
+  const [showTapHint, setShowTapHint] = useState(() => {
+    return localStorage.getItem('result_hint_visto') !== 'true';
+  });
+  const [showPinchHint, setShowPinchHint] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -2680,6 +2916,19 @@ const ResultScreen: React.FC<{
   useEffect(() => {
     if (zoomLevel === 1) setPan({ x: 0, y: 0 });
   }, [zoomLevel]);
+
+  useEffect(() => {
+    if (showImageModal) {
+      const alreadySeen = localStorage.getItem('pinch_hint_visto') === 'true';
+      if (!alreadySeen) {
+        setShowPinchHint(true);
+        setTimeout(() => {
+          setShowPinchHint(false);
+          localStorage.setItem('pinch_hint_visto', 'true');
+        }, 3000);
+      }
+    }
+  }, [showImageModal]);
 
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 0.5, 3));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 0.5, 1));
@@ -2837,6 +3086,20 @@ const ResultScreen: React.FC<{
 
   return (
     <div className="w-full h-full min-h-screen bg-white flex flex-col animate-fade-in overflow-y-auto relative">
+      <style>{`
+        @keyframes pinchFinger1 {
+          0%, 100% { transform: translate(0, 0); }
+          50% { transform: translate(12px, 12px); }
+        }
+        @keyframes pinchFinger2 {
+          0%, 100% { transform: translate(0, 0); }
+          50% { transform: translate(-12px, -12px); }
+        }
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.05); opacity: 0.8; }
+        }
+      `}</style>
       {/* Image Modal */}
       {showImageModal && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
@@ -2846,6 +3109,57 @@ const ResultScreen: React.FC<{
              alt="Preview"
              style={{ touchAction: 'pinch-zoom' }}
            />
+           
+           {/* Animação de pinça */}
+           {showPinchHint && (
+             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+               <div className="flex flex-col items-center gap-3 animate-fade-in">
+                 <div className="relative w-24 h-24">
+                   {/* Dedo 1 */}
+                   <div style={{
+                     position: 'absolute',
+                     top: '10px',
+                     left: '10px',
+                     width: '28px',
+                     height: '28px',
+                     background: 'white',
+                     borderRadius: '50%',
+                     opacity: 0.9,
+                     animation: 'pinchFinger1 1.5s ease-in-out infinite',
+                   }}/>
+                   {/* Dedo 2 */}
+                   <div style={{
+                     position: 'absolute',
+                     bottom: '10px',
+                     right: '10px',
+                     width: '28px',
+                     height: '28px',
+                     background: 'white',
+                     borderRadius: '50%',
+                     opacity: 0.9,
+                     animation: 'pinchFinger2 1.5s ease-in-out infinite',
+                   }}/>
+                   {/* Linhas conectando */}
+                   <svg width="96" height="96" className="absolute inset-0">
+                     <line x1="24" y1="24" x2="72" y2="72" 
+                       stroke="white" strokeWidth="2" strokeDasharray="4 4" opacity="0.6"/>
+                   </svg>
+                 </div>
+                 <p style={{
+                   color: 'white',
+                   fontSize: '13px',
+                   fontWeight: 'bold',
+                   textAlign: 'center',
+                   background: 'rgba(0,0,0,0.5)',
+                   padding: '8px 16px',
+                   borderRadius: '20px',
+                 }}>
+                   Use 2 dedos para dar zoom
+                 </p>
+               </div>
+             </div>
+           )}
+           
            <button 
              onClick={() => setShowImageModal(null)}
              className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full backdrop-blur-md z-10"
@@ -2899,7 +3213,11 @@ const ResultScreen: React.FC<{
                             className="w-full h-full object-cover transition-transform duration-75 ease-linear" 
                             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`, transformOrigin: 'center center' }}
                             draggable={false}
-                            onDoubleClick={() => setShowImageModal(generatedImage)}
+                            onDoubleClick={() => {
+                              setShowImageModal(generatedImage);
+                              setShowTapHint(false);
+                              localStorage.setItem('result_hint_visto', 'true');
+                            }}
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
@@ -2908,19 +3226,31 @@ const ResultScreen: React.FC<{
                     )}
                 </div>
 
-                {/* Zoom Hint Overlay */}
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-                    <div className="bg-black/40 backdrop-blur-md text-white px-4 py-2 rounded-full text-[10px] font-medium flex items-center gap-2 animate-pulse">
-                        <ZoomIn size={12} /> Use o scroll ou pinça para zoom
+                {showTapHint && (
+                  <div 
+                    className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none z-10"
+                  >
+                    <div style={{
+                      background: 'rgba(0,0,0,0.6)',
+                      backdropFilter: 'blur(4px)',
+                      color: 'white',
+                      padding: '10px 20px',
+                      borderRadius: '30px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      animation: 'pulse 2s ease-in-out infinite',
+                    }}>
+                      <span style={{ fontSize: '18px' }}>👆👆</span>
+                      Toque 2x para abrir em tela cheia
                     </div>
-                </div>
+                  </div>
+                )}
 
-                {/* Mobile Hint */}
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none sm:hidden z-10">
-                    <div className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-[8px] font-medium flex items-center gap-2 whitespace-nowrap">
-                        <Move size={10} /> Arraste e use dois dedos para zoom
-                    </div>
-                </div>
+
+
 
                 {/* Badges on Image */}
                 <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold text-purple-600 shadow-sm flex items-center gap-1 z-20">
@@ -2935,9 +3265,6 @@ const ResultScreen: React.FC<{
                 </button>
             </div>
 
-            <p className="text-[10px] text-purple-500 font-medium -mt-4 animate-pulse flex items-center gap-1">
-               <Sparkles size={10} /> Dica: Use o scroll ou pinça para dar zoom e arraste para ajustar.
-            </p>
 
             {/* Input Images Row */}
             <div className="w-full flex justify-center gap-8 items-center flex-shrink-0">
@@ -2965,6 +3292,57 @@ const ResultScreen: React.FC<{
                 <Button onClick={handleDownload} variant="primary">
                     <Download size={18} /> Baixar Imagem
                 </Button>
+
+                {/* Botões de compartilhar */}
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={onShareWhatsApp}
+                    style={{
+                      flex: 1,
+                      padding: '14px',
+                      background: '#25D366',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '16px',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    WhatsApp
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const texto = 'Olha meu novo look com o Pandora AI! 🔥✨ https://pandoravesteai.com';
+                      window.open(`https://www.instagram.com/`, '_blank');
+                      navigator.clipboard?.writeText(texto);
+                      alert('Link copiado! Cole na legenda do Instagram.');
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '14px',
+                      background: 'linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '16px',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    Instagram
+                  </button>
+                </div>
+
                 <Button onClick={onRestart} variant="outline" className="border-purple-200 text-purple-700 hover:bg-purple-50">
                     <RefreshCcw size={18} /> Trocar peça
                 </Button>
@@ -3135,6 +3513,11 @@ const CadastroScreen: React.FC<{
 
 const App: React.FC = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showAvaliacaoModal, setShowAvaliacaoModal] = useState(false);
+  const [urlPublicaImagem, setUrlPublicaImagem] = useState<string>('');
+  const [notaAvaliacao, setNotaAvaliacao] = useState(0);
+  const [comentarioAvaliacao, setComentarioAvaliacao] = useState('');
+  const [hoveredStar, setHoveredStar] = useState(0);
   const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
@@ -3193,6 +3576,41 @@ const App: React.FC = () => {
               name: userData.nome || userData.name || '',
               lastPlan: userData.lastPurchasePlan || userData.lastPlan || null,
             }));
+
+            setTimeout(async () => {
+              if (userEmail) {
+                await requestNotificationPermission(userEmail);
+              }
+            }, 3000);
+
+            // Carrega histórico do Firestore
+            try {
+              const { getDocs, collection, orderBy, query, limit } = 
+                await import('firebase/firestore');
+              
+              const historyRef = collection(db, 'users', userEmail, 'history');
+              const q = query(historyRef, orderBy('date', 'desc'), limit(50));
+              const snapshot = await getDocs(q);
+              
+              const history: HistoryItem[] = snapshot.docs.map(doc => ({
+                id: doc.data().id,
+                date: doc.data().date,
+                generatedImage: doc.data().generatedImage,
+                userImage: doc.data().userImage,
+                clothingImage: doc.data().clothingImage,
+                type: doc.data().type,
+                prompt: doc.data().prompt || '',
+              }));
+              
+              setUserState(prev => ({
+                ...prev,
+                history
+              }));
+              
+              console.log(`✅ ${history.length} itens do histórico carregados`);
+            } catch (error) {
+              console.error('Erro ao carregar histórico:', error);
+            }
 
             // Só redireciona se estiver na tela de login ou splash
             setScreen(prev => 
@@ -3415,11 +3833,51 @@ const App: React.FC = () => {
     setScreen(Screen.FINALIZE);
   };
 
-  const addToHistory = (item: HistoryItem) => {
+  const addToHistory = async (item: HistoryItem) => {
+    // Salva no estado local
     setUserState(prev => ({
         ...prev,
         history: [item, ...prev.history]
     }));
+    
+    // Salva no Firestore
+    if (userId) {
+      try {
+        // Comprime a imagem gerada antes de salvar no Firestore para evitar limite de 1MB
+        const compressedGeneratedImage = await compressImage(item.generatedImage, 1024, 1024, 0.7);
+        
+        // Também tenta converter e comprimir as imagens de entrada se forem blob URLs
+        // para garantir que o histórico seja persistente e caiba no limite
+        let compressedUserImage = item.userImage;
+        let compressedClothingImage = item.clothingImage || '';
+
+        if (item.userImage.startsWith('blob:')) {
+            const b64 = await urlToBase64(item.userImage);
+            compressedUserImage = await compressImage(`data:image/jpeg;base64,${b64}`, 800, 800, 0.6);
+        }
+        
+        if (item.clothingImage?.startsWith('blob:')) {
+            const b64 = await urlToBase64(item.clothingImage);
+            compressedClothingImage = await compressImage(`data:image/jpeg;base64,${b64}`, 800, 800, 0.6);
+        }
+
+        await setDoc(
+          doc(db, 'users', userId, 'history', item.id),
+          {
+            id: item.id,
+            date: item.date,
+            generatedImage: compressedGeneratedImage,
+            userImage: compressedUserImage,
+            clothingImage: compressedClothingImage,
+            type: item.type,
+            prompt: item.prompt || '',
+          }
+        );
+        console.log('✅ Histórico salvo no Firestore (comprimido)');
+      } catch (error) {
+        console.error('Erro ao salvar histórico:', error);
+      }
+    }
   };
 
   const handleReuseHistoryItem = (item: HistoryItem) => {
@@ -3448,8 +3906,8 @@ const App: React.FC = () => {
   };
 
   const handleGenerateLook = async (clothingImageUrl: string) => {
-    // Verifica se tem créditos ANTES de gerar
     if (userState.credits < 10) {
+      alert('❌ Você não tem créditos suficientes! Recarregue agora.');
       setScreen(Screen.CREDITS);
       return;
     }
@@ -3457,23 +3915,51 @@ const App: React.FC = () => {
     // Desconta 10 créditos ANTES de gerar
     const ok = await deductCredit(userId, 10);
     if (!ok) {
-      alert('Erro ao processar. Tente novamente.');
-      setScreen(Screen.CREDITS);
+      alert('Erro ao processar créditos. Tente novamente.');
       return;
     }
 
-    // Agora sim gera a imagem
     setLoadingMessage("A IA está criando o seu look...");
     setUserState(prev => ({ ...prev, clothingImage: clothingImageUrl }));
     setScreen(Screen.LOADING);
 
-    // Convert blob URLs to Base64
-    const userBase64 = userState.uploadedImage ? await urlToBase64(userState.uploadedImage) : "";
-    const clothingBase64 = await urlToBase64(clothingImageUrl);
+    try {
+      const userBase64 = userState.uploadedImage 
+        ? await urlToBase64(userState.uploadedImage) 
+        : "";
+      const clothingBase64 = await urlToBase64(clothingImageUrl);
 
-    if (userBase64 && clothingBase64) {
-      const resultImage = await generateTryOnLook(userBase64, clothingBase64, userState.selectedCategory || "clothes");
-      
+      if (!userBase64 || !clothingBase64) {
+        throw new Error("Erro ao processar imagens.");
+      }
+
+      const resultImage = await generateTryOnLook(
+        userBase64, 
+        clothingBase64, 
+        userState.selectedCategory || "clothes"
+      );
+
+      if (!resultImage) {
+        throw new Error("Nenhuma imagem foi gerada.");
+      }
+
+      // Salva no Firebase Storage via Cloud Function (Resolve CORS)
+      try {
+        const salvarImagemStorage = httpsCallable(functions, 'salvarImagemStorage');
+        const resultado = await salvarImagemStorage({
+          imagemBase64: resultImage,
+          userId: userId
+        });
+        
+        const { url } = resultado.data as { url: string };
+        setUrlPublicaImagem(url);
+        
+      } catch (error) {
+        console.error('Erro ao salvar imagem no Storage:', error);
+        setUrlPublicaImagem('');
+      }
+
+      // Sucesso — salva no histórico
       addToHistory({
         id: Date.now().toString(),
         date: new Date().toISOString(),
@@ -3485,8 +3971,37 @@ const App: React.FC = () => {
 
       setUserState(prev => ({ ...prev, generatedImage: resultImage }));
       setScreen(Screen.RESULT);
-    } else {
-      setScreen(Screen.FINALIZE); // Go back if error
+
+      setTimeout(() => {
+        const jaAvaliou = localStorage.getItem(`avaliou_${userId}`);
+        if (!jaAvaliou) {
+          setShowAvaliacaoModal(true);
+        }
+      }, 2500);
+
+    } catch (error: any) {
+      console.error('Erro na geração:', error);
+      
+      // DEVOLVE OS 10 CRÉDITOS AUTOMATICAMENTE
+      try {
+        await addCredits(userId, 10);
+        console.log('✅ 10 créditos devolvidos');
+      } catch (creditError) {
+        console.error('Erro ao devolver créditos:', creditError);
+      }
+
+      // Verifica tipo de erro para mensagem certa
+      const errorMsg = error?.message || '';
+      
+      if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('Too Many Requests')) {
+        alert('⚠️ Muitos usuários gerando imagens ao mesmo tempo.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente em alguns instantes.');
+      } else if (errorMsg.includes('timeout') || errorMsg.includes('deadline')) {
+        alert('⏱️ A geração demorou muito e foi cancelada.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente.');
+      } else {
+        alert('❌ Erro ao gerar imagem.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente em instantes.');
+      }
+
+      setScreen(Screen.FINALIZE);
     }
   };
 
@@ -3539,6 +4054,32 @@ const App: React.FC = () => {
 
   const handleBackToHome = () => {
       setScreen(Screen.ONBOARDING);
+  };
+
+  const salvarAvaliacao = async () => {
+    if (notaAvaliacao === 0) return;
+    
+    try {
+      const { collection, addDoc, serverTimestamp } = 
+        await import('firebase/firestore');
+      
+      await addDoc(collection(db, 'avaliacoes'), {
+        userId,
+        nota: notaAvaliacao,
+        comentario: comentarioAvaliacao.trim(),
+        categoria: userState.selectedCategory || 'geral',
+        data: serverTimestamp(),
+      });
+
+      localStorage.setItem(`avaliou_${userId}`, 'true');
+      setShowAvaliacaoModal(false);
+      setNotaAvaliacao(0);
+      setComentarioAvaliacao('');
+      console.log('✅ Avaliação salva!');
+    } catch (error) {
+      console.error('Erro ao salvar avaliação:', error);
+      setShowAvaliacaoModal(false);
+    }
   };
 
   // ═══════════════════════════════════════════════════════════
@@ -3707,6 +4248,70 @@ const App: React.FC = () => {
       } else {
         alert('❌ Erro ao enviar email.\n\nTente novamente em alguns instantes.');
       }
+    }
+  };
+
+  const compartilharWhatsApp = async () => {
+    try {
+      // Tenta compartilhar com a imagem
+      // usando Web Share API
+      const imagemGerada = userState.generatedImage;
+      if (!imagemGerada) return;
+
+      const response = await fetch(imagemGerada);
+      const blob = await response.blob();
+      const file = new File(
+        [blob], 
+        'meu-look-pandora.jpg', 
+        { type: 'image/jpeg' }
+      );
+
+      if (
+        navigator.canShare && 
+        navigator.canShare({ files: [file] })
+      ) {
+        // Compartilha com foto (funciona no 
+        // celular Android e iOS)
+        await navigator.share({
+          files: [file],
+          text: 'Olha como ficou meu novo look ' +
+                'com o Pandora AI! 🔥✨ ' +
+                'Experimente você também: ' +
+                'https://pandoravesteai.com'
+        });
+      } else {
+        // Fallback desktop: baixa a imagem
+        // e abre WhatsApp com texto
+        const link = document.createElement('a');
+        link.href = imagemGerada;
+        link.download = 'meu-look-pandora.jpg';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        setTimeout(() => {
+          const texto = encodeURIComponent(
+            'Olha como ficou meu novo look com ' +
+            'o Pandora AI! 🔥✨ Experimente você ' +
+            'também: https://pandoravesteai.com'
+          );
+          window.open(
+            `https://wa.me/?text=${texto}`,
+            '_blank'
+          );
+        }, 1500);
+      }
+    } catch (error) {
+      console.error('Erro ao compartilhar:', error);
+      const texto = encodeURIComponent(
+        'Olha como ficou meu novo look com ' +
+        'o Pandora AI! 🔥✨ Experimente você ' +
+        'também: https://pandoravesteai.com'
+      );
+      window.open(
+        `https://wa.me/?text=${texto}`,
+        '_blank'
+      );
     }
   };
 
@@ -3946,6 +4551,7 @@ const App: React.FC = () => {
             onRestart={handleRestart}
             onView360={handleView360}
             onBack={() => setScreen(Screen.CATEGORY)}
+            onShareWhatsApp={compartilharWhatsApp}
           />
         );
         onBack = () => setScreen(Screen.CATEGORY);
@@ -4021,6 +4627,147 @@ const App: React.FC = () => {
               <Button onClick={() => setShowSuccessModal(false)} className="w-full">
                 Entendi
               </Button>
+            </div>
+          </div>
+        )}
+
+        {showAvaliacaoModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px',
+            animation: 'fadeIn 0.3s ease'
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '24px',
+              padding: '32px 24px',
+              maxWidth: '340px',
+              width: '100%',
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+            }}>
+              {/* Emoji */}
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🎉</div>
+              
+              {/* Título */}
+              <h3 style={{
+                fontSize: '20px',
+                fontWeight: 'bold',
+                color: '#1a1a1a',
+                marginBottom: '6px'
+              }}>
+                Gostou do resultado?
+              </h3>
+              
+              <p style={{
+                fontSize: '13px',
+                color: '#888',
+                marginBottom: '24px'
+              }}>
+                Sua avaliação nos ajuda a melhorar!
+              </p>
+
+              {/* Estrelas */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: '8px',
+                marginBottom: '20px'
+              }}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    onClick={() => setNotaAvaliacao(star)}
+                    onMouseEnter={() => setHoveredStar(star)}
+                    onMouseLeave={() => setHoveredStar(0)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '36px',
+                      padding: '4px',
+                      transition: 'transform 0.1s ease',
+                      transform: (hoveredStar || notaAvaliacao) >= star 
+                        ? 'scale(1.2)' : 'scale(1)',
+                      filter: (hoveredStar || notaAvaliacao) >= star 
+                        ? 'none' : 'grayscale(100%)'
+                    }}
+                  >
+                    ⭐
+                  </button>
+                ))}
+              </div>
+
+              {/* Comentário opcional */}
+              {notaAvaliacao > 0 && (
+                <textarea
+                  placeholder="O que achou? (opcional)"
+                  value={comentarioAvaliacao}
+                  onChange={(e) => setComentarioAvaliacao(e.target.value)}
+                  maxLength={200}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: '12px',
+                    border: '1px solid #e0e0e0',
+                    fontSize: '13px',
+                    resize: 'none',
+                    height: '80px',
+                    marginBottom: '16px',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              )}
+
+              {/* Botões */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => {
+                    localStorage.setItem(`avaliou_${userId}`, 'true');
+                    setShowAvaliacaoModal(false);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '13px',
+                    background: '#f5f5f5',
+                    color: '#888',
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}>
+                  Agora não
+                </button>
+
+                <button
+                  onClick={salvarAvaliacao}
+                  disabled={notaAvaliacao === 0}
+                  style={{
+                    flex: 1,
+                    padding: '13px',
+                    background: notaAvaliacao > 0 
+                      ? 'linear-gradient(135deg, #9333ea, #ec4899)' 
+                      : '#e0e0e0',
+                    color: notaAvaliacao > 0 ? 'white' : '#aaa',
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: notaAvaliacao > 0 ? 'pointer' : 'not-allowed',
+                    transition: 'all 0.2s ease'
+                  }}>
+                  Enviar ⭐
+                </button>
+              </div>
             </div>
           </div>
         )}

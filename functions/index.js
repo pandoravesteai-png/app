@@ -47,10 +47,11 @@ exports.gerarTryOn = onCall({
         }],
         parameters: { 
           sampleCount: 1, 
-          baseSteps: 20, 
+          baseSteps: 40,
           personGeneration: "allow_adult", 
-          safetySetting: "block_medium_and_above", 
-          addWatermark: false 
+          safetySetting: "block_only_high", 
+          addWatermark: false,
+          guidanceScale: 7.5
         },
       }),
     });
@@ -158,5 +159,45 @@ exports.webhookPagamento = onRequest({
   } catch (error) {
     console.error("❌ Erro no webhook:", error);
     res.status(500).send("error");
+  }
+});
+
+// ========== FUNÇÃO 4: SALVAR IMAGEM NO STORAGE (NOVA!) ==========
+exports.salvarImagemStorage = onCall({
+  region: "us-central1",
+}, async (request) => {
+  if (!request.auth) {
+    throw new Error("Usuário não autenticado");
+  }
+
+  try {
+    const { imagemBase64, userId } = request.data;
+    if (!imagemBase64 || !userId) throw new Error("Dados incompletos.");
+    
+    const bucket = admin.storage().bucket();
+    const nomeArquivo = `looks/${userId}/${Date.now()}.jpg`;
+    const arquivo = bucket.file(nomeArquivo);
+
+    // Remove prefixo base64 se existir
+    const base64Data = imagemBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Salva no Storage
+    await arquivo.save(buffer, {
+      metadata: { contentType: 'image/jpeg' },
+      public: true
+    });
+
+    // Retorna URL pública
+    const urlPublica = `https://storage.googleapis.com/${bucket.name}/${nomeArquivo}`;
+
+    return { 
+      sucesso: true, 
+      url: urlPublica 
+    };
+
+  } catch (error) {
+    console.error('Erro ao salvar imagem:', error);
+    throw new Error('Erro ao salvar imagem');
   }
 });

@@ -1,0 +1,22 @@
+{
+  "name": "Pandora AI - Virtual Try-On",
+  "short_name": "Pandora AI",
+  "description": "Experimente roupas virtualmente com IA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6A00F4",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://i.postimg.cc/G2DYHjrv/P-(1).png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://i.postimg.cc/G2DYHjrv/P-(1).png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

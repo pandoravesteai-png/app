@@ -2,6 +2,8 @@ import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User, deleteUser, signOut } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 // Import the Firebase configuration
 import firebaseConfig from "../firebase-applet-config.json";
@@ -14,6 +16,10 @@ const databaseId = (firebaseConfig as any).firestoreDatabaseId;
 export const db = databaseId && databaseId !== '(default)' 
   ? getFirestore(app, databaseId) 
   : getFirestore(app);
+
+export const storage = getStorage(app);
+export const functions = getFunctions(app, 'us-central1');
+export { httpsCallable };
 
 const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 export const auth = getAuth(app);
@@ -137,5 +143,45 @@ export const deleteCurrentUser = async () => {
     } catch (error) {
       console.error("Delete User Error:", error);
     }
+  }
+};
+
+import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
+
+export const requestNotificationPermission = async (
+  userId: string
+): Promise<string | null> => {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (!('Notification' in window)) return null;
+
+    const supported = await isSupported();
+    if (!supported) {
+      console.warn('FCM is not supported in this browser.');
+      return null;
+    }
+
+    const messaging = getMessaging(app);
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return null;
+
+    const token = await getToken(messaging, {
+      vapidKey: 'BJndjYvNuqJZOELkq5MsHfNGtix4DRnnSAzkKBuS_p24Lc-VRCOH4AWLT4fWaLBUrTr7swIAYUoOWO9P6wuIo4Y'
+    });
+
+    if (token && userId) {
+      const { doc, updateDoc } = await import('firebase/firestore');
+      await updateDoc(doc(db, 'users', userId), {
+        fcmToken: token,
+        notificationsEnabled: true
+      });
+      console.log('✅ Notificações ativadas');
+    }
+
+    return token;
+  } catch (error) {
+    console.error('Erro notificações:', error);
+    return null;
   }
 };

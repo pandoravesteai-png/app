@@ -23,12 +23,15 @@ service cloud.firestore {
     }
     
     function isOwner(userId) {
-      return isAuthenticated() && (request.auth.uid == userId || request.auth.token.email == userId);
+      return isAuthenticated() && (
+        request.auth.uid == userId || 
+        (request.auth.token.email != null && request.auth.token.email.lower() == userId.lower())
+      );
     }
 
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "pandoravesteai@gmail.com");
+        (request.auth.token.email != null && request.auth.token.email.lower() == "pandoravesteai@gmail.com");
     }
 
     function hasOnlyAllowedFields(fields) {
@@ -40,12 +43,17 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['credits', 'createdAt', 'role', 'email', 'name', 'lastPlan', 'fcmToken']) &&
-             data.credits is number &&
-             data.createdAt is string &&
+      return (!('credits' in data) || data.credits is number) &&
+             (!('createdAt' in data) || data.createdAt is string) &&
              (!('email' in data) || data.email is string) &&
              (!('name' in data) || data.name is string) &&
+             (!('nome' in data) || data.nome is string) &&
              (!('lastPlan' in data) || data.lastPlan is string || data.lastPlan == null) &&
+             (!('lastPurchasePlan' in data) || data.lastPurchasePlan is string || data.lastPurchasePlan == null) &&
+             (!('lastPurchaseCredits' in data) || data.lastPurchaseCredits is number) &&
+             (!('lastPurchaseAmount' in data) || data.lastPurchaseAmount is number) &&
+             (!('lastPurchaseDate' in data) || data.lastPurchaseDate is string || data.lastPurchaseDate is timestamp) &&
+             (!('profileImage' in data) || data.profileImage is string || data.profileImage == null) &&
              (!('fcmToken' in data) || data.fcmToken is string) &&
              (!('role' in data) || data.role in ['admin', 'user']);
     }
@@ -82,8 +90,12 @@ service cloud.firestore {
                         isAdmin()
                       ) && 
                       isValidUser(request.resource.data) &&
-                      request.resource.data.createdAt == resource.data.createdAt &&
-                      (isAdmin() || request.resource.data.role == resource.data.role);
+                      (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt) &&
+                      (isAdmin() || !('role' in resource.data) || request.resource.data.role == resource.data.role);
+
+      match /history/{historyId} {
+        allow read, write: if isOwner(userId);
+      }
     }
   }
 }

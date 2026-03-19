@@ -31,16 +31,20 @@ export const generateFashionTip = async (prompt: string): Promise<string> => {
 };
 
 const STRICT_SYSTEM_PROMPT = `
-**REGRA ESTRITA E ABSOLUTA:** Você deve preservar a identidade exata da pessoa. É expressamente proibido alterar, modificar ou redesenhar os pixels correspondentes ao rosto, olhos, boca, cabelo, tom de pele, mãos e o cenário de fundo. A pessoa deve permanecer 100% idêntica à foto original. Apenas a área da roupa atual deve ser substituída, ajustando a nova peça à pose, caimento e iluminação originais de forma realista.
+You are a professional virtual try-on AI.
+Apply the clothing item to the person in the image.
 
-**Instruções Adicionais:**
-1. **Entrada:** Receba uma imagem de corpo completo da pessoa (imagem_base) e, subsequentemente, as instruções de modificação de vestuário (peca_alvo).
-2. **Execução:** Aplique as alterações solicitadas com precisão, substituindo a blusa, calça, look completo, vestido, saia, tênis, sapato, meia, bermuda ou short, conforme descrito.
-3. **Restrições:**
-   * **Características Pessoais:** Em hipótese alguma altere as características físicas da pessoa, incluindo cor da pele, cabelo, traços faciais, biotipo ou acessórios. O rosto deve ser preservado exatamente como na imagem original.
-   * **Contexto e Qualidade:** Mantenha o ambiente e o contexto inalterados. A imagem gerada deve ter qualidade e realismo padrão.
-   * **Liberdade de Estilo:** Se um usuário solicitar uma peça de roupa que tradicionalmente não corresponde ao seu gênero (ex: homem pedindo vestido, mulher pedindo smoking), EXECUTE O PEDIDO SEM HESITAÇÃO. Adapte o caimento da peça ao corpo da pessoa de forma realista.
-   * **Itens Específicos:** Se a peça for um calçado (tênis, sapato, meia), certifique-se de que ele esteja nos pés. Se for uma peça inferior (calça, saia, bermuda), na parte inferior. Se for superior (blusa, camisa), na parte superior. Se for look completo, substitua tudo.
+CRITICAL RULES - MUST FOLLOW:
+1. PRESERVE the person's exact body shape and size
+2. PRESERVE body type: if person is thin, keep thin. 
+   If person is heavy, keep heavy. NO changes to body.
+3. PRESERVE the person's face, skin tone, hair exactly
+4. PRESERVE the person's height and proportions
+5. The clothing must ADAPT to the person's body,
+   NOT the body adapting to the clothing
+6. Make the clothing fit naturally on their real body
+7. Keep background exactly the same
+8. Result must look like a real photo, photorealistic
 `;
 
 export const generateTryOnLook = async (
@@ -49,32 +53,28 @@ export const generateTryOnLook = async (
   category: string
 ): Promise<string | null> => {
   try {
-    console.log("Enviando fotos para o servidor Firebase...");
-
-    const response = await fetch('https://us-central1-pandora-ai-7c070.cloudfunctions.net/gerarTryOn', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        data: {
-          urlFotoCliente: userImageBase64,
-          urlFotoRoupa: clothingImageBase64
-        }
-      })
+    const { getFunctions, httpsCallable } = await import('firebase/functions');
+    const { app } = await import('./firebase');
+    
+    const functions = getFunctions(app, 'us-central1');
+    const gerarTryOn = httpsCallable(functions, 'gerarTryOn');
+    
+    const result = await gerarTryOn({
+      urlFotoCliente: userImageBase64,
+      urlFotoRoupa: clothingImageBase64,
     });
-
-    const json = await response.json();
-
-    if (json.result && json.result.sucesso) {
-      console.log("Imagem recebida com sucesso!");
-      return json.result.imagemGerada;
-    } else {
-      console.error("Erro no servidor:", json);
-      return null;
+    
+    const data = result.data as any;
+    
+    if (data.sucesso && data.imagemGerada) {
+      return data.imagemGerada;
     }
+    
+    console.error('Erro Try-On:', data.erro);
+    return null;
+    
   } catch (error) {
-    console.error("Erro ao chamar o servidor Firebase:", error);
+    console.error('Erro no Try-On:', error);
     return null;
   }
 };
@@ -106,16 +106,20 @@ export const generate360View = async (
         ${STRICT_SYSTEM_PROMPT}
 
         TAREFA ESPECÍFICA:
-        Substitua a ${category} (area_de_troca) da pessoa na imagem_base pela peça de roupa fornecida na peca_alvo.
-        Esta é uma visão ${view} (frente/lado/costas) da pessoa.
+        Apply the clothing item to the person in the image.
+        Category: ${category}
+        This is a ${view} (front/side/back) view of the person.
+        
+        Generate a photorealistic result where the clothing 
+        fits naturally on this person's exact body type.
       `;
       
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
           parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: personImage } },
-            { inlineData: { mimeType: 'image/jpeg', data: clothingImageB64 } },
+            { inlineData: { mimeType: 'image/jpeg', data: personImage.split(',')[1] || personImage } },
+            { inlineData: { mimeType: 'image/jpeg', data: clothingImageB64.split(',')[1] || clothingImageB64 } },
             { text: prompt }
           ]
         }
