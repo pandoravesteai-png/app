@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Component } from 'react';
 import { Screen, UserState, ClothingType, HistoryItem } from './types';
 import { AppLogo, Button, Input } from './components/UI';
 import { CATEGORIES, HOME_CAROUSEL_1, HOME_CAROUSEL_2 } from './constants';
-import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move } from 'lucide-react';
+import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle } from 'lucide-react';
 import { doc, updateDoc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { db, auth, handleFirestoreError, OperationType, storage, functions, httpsCallable } from './services/firebase';
@@ -21,6 +21,17 @@ import { generateFashionTip, generateTryOnLook, generate360View } from './servic
 import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider, requestNotificationPermission } from './services/firebase';
 import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail } from './services/creditsService';
 import { createPixPayment } from './services/paymentService';
+
+// --- Sharing Functions ---
+const compartilharWhatsApp = (imageUrl?: string) => {
+  const text = encodeURIComponent("Olha que incrível como essa peça ficou em mim usando a Pandora AI! ✨👗\n\nExperimente você também: https://pandora-ai.com");
+  const url = `https://wa.me/?text=${text}`;
+  window.open(url, '_blank');
+};
+
+const compartilharInstagram = () => {
+  window.open('https://www.instagram.com/', '_blank');
+};
 
 // --- PWA and Notifications ---
 declare global {
@@ -138,9 +149,10 @@ const NoRegistrationScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 };
 
 // --- Promo Carousel ---
-const PromoCarousel: React.FC = () => {
+const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
   const [currentSlide, setCurrentSlide] = useState(0);
   
+  if (isPremium) return null;
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % 5);
 
   const slides = [
@@ -245,27 +257,6 @@ const PromoCarousel: React.FC = () => {
         </button>
       </div>
     ),
-    // Slide 5: WhatsApp
-    (
-      <div className="w-full h-full bg-white border-4 border-purple-500 rounded-3xl flex flex-col items-center justify-center p-4 relative overflow-hidden text-center">
-        <h3 className="text-xl font-bold text-[#6A00F4] mb-2 leading-tight">Pronto para Transformar Sua Imagem?</h3>
-        <p className="text-[10px] text-gray-600 mb-4 px-4 leading-tight">
-           Fale com nossa equipe e garanta seu Book Profissional hoje mesmo!
-        </p>
-        
-        <button 
-          onClick={() => window.open('https://wa.me/5583987368351?text=Ol%C3%A1%2C%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20o%20BOOk%20de%20fotos%20profissionais!', '_blank')}
-          className="bg-[#25D366] text-white px-5 py-3 rounded-full font-bold flex items-center gap-2 shadow-lg hover:bg-[#20bd5a] transition-transform active:scale-95 animate-pulse mb-3 w-full justify-center max-w-xs"
-        >
-           <span className="text-sm">Falar com Especialista</span>
-        </button>
-        
-        <div className="flex items-center gap-3 text-[8px] text-gray-400">
-           <span className="flex items-center gap-1"><ShieldCheck size={8} /> Compra Segura</span>
-           <span className="flex items-center gap-1"><Lock size={8} /> Privacidade</span>
-        </div>
-      </div>
-    )
   ];
 
   useEffect(() => {
@@ -837,7 +828,7 @@ const LoginScreen: React.FC<{
       const name = user.displayName || 'Usuário';
 
       // Vai para o app IMEDIATAMENTE
-      setUserId(userEmail);
+      setUserId(user.uid);
       setUserState(prev => ({ 
         ...prev, 
         email: userEmail,
@@ -847,7 +838,7 @@ const LoginScreen: React.FC<{
       setScreen(Screen.ONBOARDING);
 
       // Busca/cria dados no Firestore em segundo plano
-      const userRef = doc(db, 'users', userEmail);
+      const userRef = doc(db, 'users', user.uid);
       getDoc(userRef).then(async (userSnap) => {
         if (!userSnap.exists()) {
           await setDoc(userRef, {
@@ -879,12 +870,13 @@ const LoginScreen: React.FC<{
       setError(null);
       
       // Faz login
-      await signInWithEmailAndPassword(auth, emailLower, passwordInput);
+      const result = await signInWithEmailAndPassword(auth, emailLower, passwordInput);
+      const user = result.user;
       
       // Login bem-sucedido
-      setUserId(emailLower);
-      await saveUserEmail(emailLower, emailLower);
-      const credits = await getOrCreateUserCredits(emailLower);
+      setUserId(user.uid);
+      await saveUserEmail(user.uid, emailLower);
+      const credits = await getOrCreateUserCredits(user.uid);
       
       setUserState(prev => ({ 
         ...prev, 
@@ -941,15 +933,18 @@ const LoginScreen: React.FC<{
       }
       
       // Cria documento no Firestore
-      setUserId(emailLower);
-      await saveUserEmail(emailLower, emailLower);
-      const credits = await getOrCreateUserCredits(emailLower);
-      
-      setUserState(prev => ({ 
-        ...prev, 
-        email: emailLower,
-        credits 
-      }));
+      const user = auth.currentUser;
+      if (user) {
+        setUserId(user.uid);
+        await saveUserEmail(user.uid, emailLower);
+        const credits = await getOrCreateUserCredits(user.uid);
+        
+        setUserState(prev => ({ 
+          ...prev, 
+          email: emailLower,
+          credits 
+        }));
+      }
       
       alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVerifique seu email para mais informações.');
       setScreen(Screen.ONBOARDING);
@@ -1167,7 +1162,7 @@ const ProfileScreen: React.FC<{
                     </div>
                     
                     <div className="flex-1 flex flex-col gap-6">
-                        <div className="w-full aspect-[3/4] rounded-2xl overflow-hidden border-2 border-purple-500 shadow-2xl bg-gray-900 relative">
+                        <div className="w-full aspect-[9/16] rounded-2xl overflow-hidden border-2 border-purple-500 shadow-2xl bg-gray-900 relative">
                             <img src={selectedHistoryItem.generatedImage} className="w-full h-full object-cover" alt="Generated" />
                             <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-white/10">
                                 {new Date(selectedHistoryItem.date).toLocaleDateString()}
@@ -1608,7 +1603,7 @@ const ProfileScreen: React.FC<{
                                         setSelectedHistoryItem(item);
                                       }
                                     }}
-                                    className={`relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm border-2 group transition-all
+                                    className={`relative aspect-[9/16] rounded-2xl overflow-hidden shadow-sm border-2 group transition-all
                                       ${selectionMode && selectedItems.includes(item.id) 
                                         ? 'border-purple-500 scale-95' 
                                         : 'border-gray-100'
@@ -2154,14 +2149,40 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
   );
 };
 
+const PremiumBanner: React.FC<{ onUpgrade: () => void }> = ({ onUpgrade }) => {
+  return (
+    <div className="w-full my-4 px-6 py-4 bg-gradient-to-r from-purple-600 to-pink-500 flex flex-col sm:flex-row items-center gap-4 shadow-lg rounded-2xl relative overflow-hidden animate-pulse-soft">
+      <div className="absolute top-0 right-0 p-2 opacity-20">
+        <Sparkles size={40} className="text-white" />
+      </div>
+      <div className="flex-1 text-center sm:text-left z-10">
+        <h4 className="text-white font-bold text-lg leading-tight mb-1 flex items-center gap-2 justify-center sm:justify-start">
+          <Zap size={20} className="text-yellow-300" /> Quero o Plano Premium 🚀
+        </h4>
+        <p className="text-white/90 text-xs leading-relaxed">
+          Libere 360°, formatos Instagram/Stories e ganhe 300 créditos agora!
+        </p>
+      </div>
+      <button 
+        onClick={onUpgrade}
+        className="px-6 py-2 bg-white text-purple-700 font-bold text-sm rounded-full shadow-md hover:scale-105 active:scale-95 transition-all z-10"
+      >
+        Assinar por R$29,90
+      </button>
+    </div>
+  );
+};
+
 const MainLayout: React.FC<{
   children: React.ReactNode;
   credits: number;
   onOpenCredits: () => void;
   onOpenFAQ: () => void;
   showBanner?: boolean;
+  isPremium?: boolean;
   onBack?: () => void;
-}> = ({ children, credits, onOpenCredits, onOpenFAQ, showBanner = true, onBack }) => {
+  backIcon?: 'arrow' | 'x';
+}> = ({ children, credits, onOpenCredits, onOpenFAQ, showBanner = true, isPremium = false, onBack, backIcon = 'arrow' }) => {
   const [showCreditsInfo, setShowCreditsInfo] = useState(false);
 
   const badgeConfig = (() => {
@@ -2214,8 +2235,8 @@ const MainLayout: React.FC<{
       <div className="w-full h-16 bg-white flex items-center justify-between px-6 sticky top-0 z-50 border-b border-gray-50/50 backdrop-blur-sm bg-white/95">
         <div className="flex items-center gap-2">
           {onBack && (
-            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors">
-              <ArrowLeft size={20} />
+            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-900 transition-colors active:scale-90">
+              {backIcon === 'x' ? <X size={24} /> : <ArrowLeft size={20} />}
             </button>
           )}
           <div className="flex items-center gap-2.5">
@@ -2248,7 +2269,12 @@ const MainLayout: React.FC<{
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar">
-        {showBanner && <CreditAlertBanner credits={credits} onOpenCredits={onOpenCredits} />}
+        {showBanner && (
+          <div className="px-6">
+            <CreditAlertBanner credits={credits} onOpenCredits={onOpenCredits} />
+            {!isPremium && <PremiumBanner onUpgrade={onOpenCredits} />}
+          </div>
+        )}
         {children}
       </div>
     </div>
@@ -2262,8 +2288,9 @@ const HomeScreen: React.FC<{
     userName?: string;
     onOpenFAQ: () => void;
     isFirstLogin?: boolean;
+    isPremium?: boolean;
     onGuiaVisto?: () => void;
-}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, onGuiaVisto }) => {
+}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, isPremium = false, onGuiaVisto }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
@@ -2483,7 +2510,7 @@ const HomeScreen: React.FC<{
         </div>
 
         <div className="w-full px-4 pb-4">
-           <PromoCarousel />
+           <PromoCarousel isPremium={isPremium} />
         </div>
 
         {/* FAQ Link */}
@@ -2570,12 +2597,18 @@ const FinalizeScreen: React.FC<{
   onRestart: () => void;
   onBack: () => void;
   loading: boolean;
-}> = ({ category, userImage, onGenerate, onRestart, onBack, loading }) => {
+  isPremium?: boolean;
+}> = ({ category, userImage, onGenerate, onRestart, onBack, loading, isPremium = false }) => {
   const [clothingImage, setClothingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showGifGuide, setShowGifGuide] = useState(false);
+  const [showClothingCheck, setShowClothingCheck] = useState(false);
+  const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
   const [gifGuiaVisto, setGifGuiaVisto] = useState(() => {
     return localStorage.getItem('gif_guia_visto') === 'true';
+  });
+  const [clothingCheckVisto, setClothingCheckVisto] = useState(() => {
+    return localStorage.getItem('clothing_check_visto') === 'true';
   });
 
   const getScreenTexts = (categoryId: string) => {
@@ -2584,7 +2617,6 @@ const FinalizeScreen: React.FC<{
       case 'calca': return { title: <>A calça do <span className="text-[#6A00F4]">look</span>.</>, subtitle: "Personalize os detalhes.", label: "FOTO DA CALÇA", placeholder: "Arraste ou selecione a imagem da peça (ex: uma calça jeans)" };
       case 'short': return { title: <>O short/bermuda do <span className="text-[#6A00F4]">look</span>.</>, subtitle: "Personalize os detalhes.", label: "FOTO DO SHORT/BERMUDA", placeholder: "Arraste ou selecione a imagem da peça" };
       case 'saia': return { title: "Qual vestido vai te fazer apaixonar?", subtitle: "Envie a foto e deixe a mágica acontecer.", label: "FOTO DA SAIA/VESTIDO", placeholder: "Arraste ou selecione a imagem da peça" };
-      case 'sapatos': return { title: "Qual sapato vai te fazer apaixonar?", subtitle: "Envie a foto e deixe a mágica acontecer.", label: "FOTO DO SAPATO", placeholder: "Arraste ou selecione a imagem da peça" };
       case 'looks': return { title: "Qual look vai te deixar mais estiloso?", subtitle: "Envie a foto e deixe a mágica acontecer.", label: "FOTO DO LOOK COMPLETO", placeholder: "Arraste ou selecione a imagem do look completo" };
       default: return { title: <>A peça do <span className="text-[#6A00F4]">look</span>.</>, subtitle: "Personalize os detalhes.", label: "FOTO DA PEÇA", placeholder: "Arraste ou selecione a imagem da peça" };
     }
@@ -2595,8 +2627,34 @@ const FinalizeScreen: React.FC<{
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const url = URL.createObjectURL(e.target.files[0]);
-      setClothingImage(url);
+      
+      if (!clothingCheckVisto) {
+        setPendingImageUrl(url);
+        setShowClothingCheck(true);
+      } else {
+        setClothingImage(url);
+      }
     }
+  };
+
+  const handleConfirmOnlyPiece = () => {
+    if (pendingImageUrl) {
+      setClothingImage(pendingImageUrl);
+      setPendingImageUrl(null);
+    }
+    setShowClothingCheck(false);
+    setClothingCheckVisto(true);
+    localStorage.setItem('clothing_check_visto', 'true');
+  };
+
+  const handleNotOnlyPiece = () => {
+    setShowClothingCheck(false);
+    setShowGifGuide(true);
+    // We don't mark as seen yet because they said "No", so they might need to see it again or they just want to see the guide.
+    // Actually, the user said "depois não aparece mais", so maybe we should mark it as seen anyway or after they see the guide.
+    // Let's mark it as seen after they interact with the guide or this modal.
+    setClothingCheckVisto(true);
+    localStorage.setItem('clothing_check_visto', 'true');
   };
 
   const triggerUpload = () => {
@@ -2676,8 +2734,41 @@ const FinalizeScreen: React.FC<{
 
 
         <div className="flex-1 flex flex-col justify-end mt-4 mb-2">
-           <PromoCarousel />
+           <PromoCarousel isPremium={isPremium} />
         </div>
+
+        {/* Modal de Verificação da Peça */}
+        {showClothingCheck && (
+          <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-fade-in">
+            <div className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-2xl text-center border border-purple-100">
+              <div className="w-20 h-20 bg-yellow-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertTriangle size={40} className="text-yellow-500" />
+              </div>
+              
+              <h3 className="text-2xl font-bold text-gray-900 mb-3 leading-tight">
+                ⚠️ A foto tem só a peça?
+              </h3>
+              <p className="text-gray-500 mb-8 text-sm">
+                Sem modelo vestindo? Para um resultado perfeito, a peça deve estar sozinha.
+              </p>
+              
+              <div className="space-y-3">
+                <button 
+                  onClick={handleConfirmOnlyPiece}
+                  className="w-full py-4 bg-green-500 hover:bg-green-600 text-white rounded-2xl font-bold transition-all active:scale-95 shadow-lg shadow-green-100 flex items-center justify-center gap-2"
+                >
+                  ✅ Sim, só a peça
+                </button>
+                <button 
+                  onClick={handleNotOnlyPiece}
+                  className="w-full py-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl font-bold transition-all active:scale-95"
+                >
+                  Não
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal Guia de Peça */}
         {showGifGuide && (
@@ -2764,7 +2855,6 @@ const View360Screen: React.FC<{
 
   return (
     <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up pb-8 relative overflow-y-auto">
-       {/* Header removido - agora no MainLayout */}
        <div className="px-6 pb-4 text-center pt-6">
         <div className="inline-flex items-center gap-2 bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-purple-100">
            <Rotate3d size={14} /> MODO 360°
@@ -2841,54 +2931,510 @@ const View360Screen: React.FC<{
   );
 };
 
+// --- Result 360 Image Item ---
+const Result360ImageItem: React.FC<{
+  img: string;
+  label: string;
+  isPremiumUser: boolean;
+  onRestart: () => void;
+  aspectRatio: 'original' | '9/16' | '1/1' | '4/5';
+}> = ({ img, label, isPremiumUser, onRestart, aspectRatio }) => {
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [touchStartDist, setTouchStartDist] = useState<number | null>(null);
+  const [naturalAspectRatio, setNaturalAspectRatio] = useState<number | null>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [modalZoom, setModalZoom] = useState(1);
+  const [modalPan, setModalPan] = useState({ x: 0, y: 0 });
+  const [showPinchHint, setShowPinchHint] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = (e: React.MouseEvent | React.TouchEvent, isModal = false) => {
+    const zoom = isModal ? modalZoom : zoomLevel;
+    if (zoom <= 1) return;
+    setIsDragging(true);
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    const currentPan = isModal ? modalPan : pan;
+    setDragStart({ x: clientX - currentPan.x, y: clientY - currentPan.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent | React.TouchEvent, isModal = false) => {
+    const zoom = isModal ? modalZoom : zoomLevel;
+    if (!isDragging || zoom <= 1) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    if (isModal) {
+      setModalPan({ x: clientX - dragStart.x, y: clientY - dragStart.y });
+    } else {
+      setPan({ x: clientX - dragStart.x, y: clientY - dragStart.y });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    setTouchStartDist(null);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent, isModal = false) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      setTouchStartDist(dist);
+    } else {
+      handleMouseDown(e, isModal);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent, isModal = false) => {
+    if (e.touches.length === 2 && touchStartDist !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const delta = dist / touchStartDist;
+      if (isModal) {
+        setModalZoom(prev => Math.min(Math.max(prev * delta, 1), 4));
+      } else {
+        setZoomLevel(prev => Math.min(Math.max(prev * delta, 1), 3));
+      }
+      setTouchStartDist(dist);
+    } else {
+      handleMouseMove(e, isModal);
+    }
+  };
+
+  const handleDoubleTap = (isModal = false) => {
+    if (isModal) {
+      if (modalZoom > 1) {
+        setModalZoom(1);
+        setModalPan({ x: 0, y: 0 });
+      } else {
+        setModalZoom(2.5);
+      }
+    } else {
+      if (zoomLevel > 1) {
+        setZoomLevel(1);
+        setPan({ x: 0, y: 0 });
+      } else {
+        setZoomLevel(2);
+      }
+    }
+  };
+
+  const getAspectRatioClass = () => {
+    switch (aspectRatio) {
+      case '9/16': return 'aspect-[9/16]';
+      case '1/1': return 'aspect-square';
+      case '4/5': return 'aspect-[4/5]';
+      default: return '';
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!img || !containerRef.current) return;
+
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.src = img;
+    
+    await new Promise((resolve) => {
+        image.onload = resolve;
+    });
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let targetWidth = 1080;
+    let targetHeight;
+
+    if (aspectRatio === 'original') {
+        targetWidth = image.naturalWidth;
+        targetHeight = image.naturalHeight;
+    } else if (aspectRatio === '9/16') {
+        targetHeight = (targetWidth * 16) / 9;
+    } else if (aspectRatio === '1/1') {
+        targetHeight = targetWidth;
+    } else if (aspectRatio === '4/5') {
+        targetHeight = (targetWidth * 5) / 4;
+    } else {
+        targetHeight = (targetWidth * 4) / 3;
+    }
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    // Calculate scaling to fill image into canvas (cover)
+    const imgAspectRatio = image.naturalWidth / image.naturalHeight;
+    const canvasAspectRatio = canvas.width / canvas.height;
+    
+    let drawWidth, drawHeight;
+    if (imgAspectRatio > canvasAspectRatio) {
+        // Image is wider than canvas, match height
+        drawHeight = canvas.height;
+        drawWidth = canvas.height * imgAspectRatio;
+    } else {
+        // Image is taller than canvas, match width
+        drawWidth = canvas.width;
+        drawHeight = canvas.width / imgAspectRatio;
+    }
+
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.scale(zoomLevel, zoomLevel);
+    
+    const containerWidth = containerRef.current.clientWidth;
+    const containerHeight = containerRef.current.clientHeight;
+    const panScaleX = canvas.width / containerWidth; 
+    const panScaleY = canvas.height / containerHeight;
+    ctx.translate(pan.x * panScaleX, pan.y * panScaleY);
+    
+    ctx.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    ctx.restore();
+
+    // Watermark
+    ctx.font = `bold ${Math.max(20, canvas.width * 0.02)}px Inter, sans-serif`;
+    ctx.fillStyle = "rgba(106, 0, 244, 0.8)";
+    ctx.textAlign = "right";
+    ctx.fillText("PANDORA AI", canvas.width - (canvas.width * 0.02), canvas.height - (canvas.height * 0.02));
+
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = `pandora-360-${label.toLowerCase()}-${aspectRatio.replace('/', '-')}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  useEffect(() => {
+    if (showImageModal) {
+      const alreadySeen = localStorage.getItem('pinch_hint_visto_360') === 'true';
+      if (!alreadySeen) {
+        setShowPinchHint(true);
+        setTimeout(() => {
+          setShowPinchHint(false);
+          localStorage.setItem('pinch_hint_visto_360', 'true');
+        }, 3000);
+      }
+    } else {
+      setModalZoom(1);
+      setModalPan({ x: 0, y: 0 });
+    }
+  }, [showImageModal]);
+
+  return (
+    <div className="flex flex-col gap-4 min-w-[85%] snap-center pb-4">
+      {/* Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-center">
+          <div 
+            className="w-full h-full relative overflow-hidden flex items-center justify-center touch-none"
+            onMouseDown={(e) => handleMouseDown(e, true)}
+            onMouseMove={(e) => handleMouseMove(e, true)}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchStart={(e) => handleTouchStart(e, true)}
+            onTouchMove={(e) => handleTouchMove(e, true)}
+            onTouchEnd={handleMouseUp}
+            onDoubleClick={() => handleDoubleTap(true)}
+          >
+            <img 
+              src={img} 
+              className="max-w-full max-h-full object-contain transition-transform duration-75 ease-linear"
+              style={{ transform: `translate(${modalPan.x}px, ${modalPan.y}px) scale(${modalZoom})` }}
+              draggable={false}
+            />
+
+            {showPinchHint && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative w-24 h-24">
+                    <div className="absolute inset-0 border-4 border-white/40 rounded-full animate-ping"/>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-8">
+                      <div className="w-4 h-4 bg-white rounded-full opacity-90" style={{ animation: 'pinchFinger1 1.5s ease-in-out infinite' }}/>
+                      <div className="w-4 h-4 bg-white rounded-full opacity-90" style={{ animation: 'pinchFinger2 1.5s ease-in-out infinite' }}/>
+                    </div>
+                  </div>
+                  <p className="text-white text-sm font-bold bg-black/50 px-4 py-2 rounded-full">Use 2 dedos para dar zoom</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Zoom Controls */}
+          <div className="absolute bottom-40 left-1/2 -translate-x-1/2 flex gap-4 z-20">
+            <button onClick={() => setModalZoom(prev => Math.max(prev - 0.5, 1))} className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white border border-white/30">
+              <ZoomIn size={20} className="rotate-180" />
+            </button>
+            <button onClick={() => setModalZoom(prev => Math.min(prev + 0.5, 4))} className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white border border-white/30">
+              <ZoomIn size={20} />
+            </button>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="absolute bottom-8 left-0 right-0 px-6 flex flex-col gap-3 z-20">
+            <button
+              onClick={onRestart}
+              className="w-full py-3.5 bg-white text-[#6A00F4] border-2 border-[#6A00F4] rounded-2xl text-sm font-bold flex items-center justify-center gap-2"
+            >
+              <RefreshCcw size={18} /> Trocar peça
+            </button>
+          </div>
+          
+          <button 
+            onClick={() => setShowImageModal(false)}
+            className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full backdrop-blur-md z-10"
+          >
+            <X size={24} />
+          </button>
+        </div>
+      )}
+
+      <div 
+        ref={containerRef}
+        className={`relative w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-lg border-4 border-[#6A00F4] bg-[#6A00F4]/5 cursor-pointer touch-none`}
+        style={aspectRatio === 'original' && naturalAspectRatio ? { aspectRatio: naturalAspectRatio } : {}}
+      >
+        <div 
+          className="w-full h-full overflow-hidden relative"
+          onMouseDown={(e) => handleMouseDown(e)}
+          onMouseMove={(e) => handleMouseMove(e)}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={(e) => handleTouchStart(e)}
+          onTouchMove={(e) => handleTouchMove(e)}
+          onTouchEnd={handleMouseUp}
+          onDoubleClick={() => handleDoubleTap()}
+        >
+          <img 
+            src={img} 
+            className="w-full h-full object-cover transition-transform duration-75 ease-linear" 
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`, transformOrigin: 'center center' }}
+            draggable={false}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setNaturalAspectRatio(img.naturalWidth / img.naturalHeight);
+            }}
+          />
+        </div>
+        <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-md text-white text-[10px] px-2 py-1 rounded font-bold">
+          {label}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Result 360 Screen ---
 const Result360Screen: React.FC<{ 
   images: string[] | null; 
   onRestart: () => void;
   onBack: () => void;
-}> = ({ images, onRestart, onBack }) => {
-   
-   const handleDownloadAll = () => {
-     images?.forEach((img, idx) => {
-        const link = document.createElement('a');
-        link.href = img;
-        link.download = `pandora-look-360-${idx}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-     });
-   };
+  userState: UserState;
+  aspectRatio: 'original' | '9/16' | '1/1' | '4/5';
+  setAspectRatio: (ratio: 'original' | '9/16' | '1/1' | '4/5') => void;
+}> = ({ images, onRestart, onBack, userState, aspectRatio, setAspectRatio }) => {
+  const isPremiumUser = userState.lastPlan === 'Premium' || userState.lastPlan === 'premium' || userState.lastPlan === '30';
 
-   return (
-     <div className="w-full h-full min-h-screen bg-white flex flex-col animate-fade-in overflow-y-auto">
-        {/* Header removido - agora no MainLayout */}
-        <div className="px-6 pt-6 pb-4 bg-white z-10 text-center shadow-sm shrink-0">
-             <h1 className="text-xl font-bold text-gray-900 leading-tight">Look 360°</h1>
+  const handleDownloadAll = async () => {
+    if (!images) return;
+    alert('Iniciando download das 3 imagens...');
+    
+    for (let i = 0; i < images.length; i++) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = images[i];
+      await new Promise((resolve) => {
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
+
+          let targetWidth = 1080;
+          let targetHeight;
+
+          if (aspectRatio === 'original') {
+            targetWidth = img.naturalWidth;
+            targetHeight = img.naturalHeight;
+          } else if (aspectRatio === '9/16') {
+            targetHeight = (targetWidth * 16) / 9;
+          } else if (aspectRatio === '1/1') {
+            targetHeight = targetWidth;
+          } else if (aspectRatio === '4/5') {
+            targetHeight = (targetWidth * 5) / 4;
+          } else {
+            targetHeight = (targetWidth * 4) / 3;
+          }
+
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+
+          const imgAspectRatio = img.naturalWidth / img.naturalHeight;
+          const canvasAspectRatio = canvas.width / canvas.height;
+          
+          let drawWidth, drawHeight;
+          if (imgAspectRatio > canvasAspectRatio) {
+            drawHeight = canvas.height;
+            drawWidth = canvas.height * imgAspectRatio;
+          } else {
+            drawWidth = canvas.width;
+            drawHeight = canvas.width / imgAspectRatio;
+          }
+
+          ctx.save();
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+          ctx.restore();
+
+          // Watermark
+          ctx.font = `bold ${Math.max(20, canvas.width * 0.02)}px Inter, sans-serif`;
+          ctx.fillStyle = "rgba(106, 0, 244, 0.8)";
+          ctx.textAlign = "right";
+          ctx.fillText("PANDORA AI", canvas.width - (canvas.width * 0.02), canvas.height - (canvas.height * 0.02));
+
+          const link = document.createElement('a');
+          link.href = canvas.toDataURL('image/png');
+          const labels = ['Frente', 'Lateral', 'Costas'];
+          link.download = `pandora-360-${labels[i].toLowerCase()}-${aspectRatio.replace('/', '-')}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          resolve(null);
+        };
+      });
+      // Small delay between downloads
+      await new Promise(r => setTimeout(r, 500));
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white overflow-y-auto pb-24">
+      {/* Aspect Ratio Tabs - Applied to all */}
+      <div className="flex justify-center mt-4 mb-2">
+        <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+          <button onClick={() => setAspectRatio('original')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === 'original' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}>Original</button>
+          <button 
+            onClick={() => {
+              if (!isPremiumUser) {
+                alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                return;
+              }
+              setAspectRatio('4/5');
+            }} 
+            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
+          >
+            Instagram {!isPremiumUser && '🔒'}
+          </button>
+          <button 
+            onClick={() => {
+              if (!isPremiumUser) {
+                alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                return;
+              }
+              setAspectRatio('9/16');
+            }} 
+            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
+          >
+            Storys {!isPremiumUser && '🔒'}
+          </button>
+          <button 
+            onClick={() => {
+              if (!isPremiumUser) {
+                alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                return;
+              }
+              setAspectRatio('1/1');
+            }} 
+            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '1/1' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
+          >
+            Square {!isPremiumUser && '🔒'}
+          </button>
         </div>
+      </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto px-6 pb-12 space-y-6 pt-6">
-           {images && images.map((img, idx) => (
-             <div key={idx} className="relative w-full aspect-[3/4] rounded-2xl overflow-hidden shadow-lg border-4 border-white bg-gray-100">
-                <img src={img} className="w-full h-full object-cover" alt={`Ângulo ${idx}`} />
-                <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-md text-white text-[10px] px-2 py-1 rounded font-bold">
-                   {idx === 0 ? "FRENTE" : idx === 1 ? "LADO" : "COSTAS"}
-                </div>
-             </div>
-           ))}
+      {/* 360 Images List */}
+      <div className="flex-1 px-6">
+        {images && images.length >= 3 ? (
+          <div className="flex flex-row overflow-x-auto gap-4 pb-12 snap-x no-scrollbar">
+            <div className="min-w-[85%] snap-center">
+              <Result360ImageItem 
+                img={images[0]} 
+                label="Frente" 
+                onRestart={onRestart}
+                isPremiumUser={isPremiumUser}
+                aspectRatio={aspectRatio}
+              />
+            </div>
+            <div className="min-w-[85%] snap-center">
+              <Result360ImageItem 
+                img={images[1]} 
+                label="Lateral" 
+                onRestart={onRestart}
+                isPremiumUser={isPremiumUser}
+                aspectRatio={aspectRatio}
+              />
+            </div>
+            <div className="min-w-[85%] snap-center">
+              <Result360ImageItem 
+                img={images[2]} 
+                label="Costas" 
+                onRestart={onRestart}
+                isPremiumUser={isPremiumUser}
+                aspectRatio={aspectRatio}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="py-20 flex flex-col items-center justify-center text-gray-400 gap-4">
+            <Rotate3d size={48} className="animate-spin-slow" />
+            <p className="text-sm font-medium">Carregando visualização 360°...</p>
+          </div>
+        )}
+      </div>
 
-           {/* Buttons at the end of scroll */}
-           <div className="space-y-3 pt-6 pb-8">
-              <Button onClick={handleDownloadAll}>
-                  <Download size={18} /> Baixar Todas as Imagens
-              </Button>
-              <Button variant="outline" onClick={onRestart}>
-                  <Home size={18} /> Voltar para o início
-              </Button>
-           </div>
+      {/* Bottom Actions */}
+      <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-white via-white to-transparent pt-10 z-20">
+        <div className="max-w-md mx-auto flex flex-col gap-3">
+          <button 
+            onClick={handleDownloadAll}
+            className="w-full py-4 bg-[#6A00F4] text-white rounded-2xl font-black text-sm flex items-center justify-center gap-3 shadow-xl shadow-purple-200 active:scale-95 transition-all"
+          >
+            <Download size={20} /> BAIXAR TODAS AS FOTOS
+          </button>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button 
+              onClick={() => compartilharWhatsApp()} 
+              className="py-3.5 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+            >
+              <MessageCircle size={18} /> WhatsApp
+            </button>
+            <button 
+              onClick={() => compartilharInstagram()} 
+              className="py-3.5 bg-gradient-to-tr from-[#f09433] via-[#e6683c] to-[#bc1888] text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+            >
+              <Instagram size={18} /> Instagram
+            </button>
+          </div>
+          
+          <button 
+            onClick={onRestart}
+            className="w-full py-4 bg-white text-gray-500 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 border-2 border-gray-100 active:scale-95 transition-all"
+          >
+            <Home size={18} /> Voltar ao Início
+          </button>
         </div>
-     </div>
-   );
+      </div>
+    </div>
+  );
 };
 
 const ResultScreen: React.FC<{ 
@@ -2898,8 +3444,10 @@ const ResultScreen: React.FC<{
   onRestart: () => void;
   onView360: () => void;
   onBack: () => void;
-  onShareWhatsApp: () => void;
-}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, onShareWhatsApp }) => {
+  userState: UserState;
+  aspectRatio: 'original' | '9/16' | '1/1' | '4/5';
+  setAspectRatio: (ratio: 'original' | '9/16' | '1/1' | '4/5') => void;
+}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, userState, aspectRatio, setAspectRatio }) => {
   const [showImageModal, setShowImageModal] = useState<string | null>(null);
   const [showTapHint, setShowTapHint] = useState(() => {
     return localStorage.getItem('result_hint_visto') !== 'true';
@@ -2910,8 +3458,23 @@ const ResultScreen: React.FC<{
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [touchStartDist, setTouchStartDist] = useState<number | null>(null);
-  const [aspectRatio, setAspectRatio] = useState<'original' | '9/16' | '1/1' | '4/5'>('original');
+  const [naturalAspectRatio, setNaturalAspectRatio] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [show360Modal, setShow360Modal] = useState(false);
+
+  const isPremiumUser = userState.lastPlan === 'Premium' || userState.lastPlan === 'premium' || userState.lastPlan === '30';
+
+  const [activeAngleIndex, setActiveAngleIndex] = useState(0); // 0: Front, 1: Side, 2: Back
+  const has360Images = userState.generated360Images && userState.generated360Images.length >= 3;
+  const currentImage = has360Images ? userState.generated360Images[activeAngleIndex] : generatedImage;
+
+  const handleVeja360 = () => {
+    if (!isPremiumUser) {
+      setShow360Modal(true);
+      return;
+    }
+    onView360();
+  };
 
   useEffect(() => {
     if (zoomLevel === 1) setPan({ x: 0, y: 0 });
@@ -2980,23 +3543,21 @@ const ResultScreen: React.FC<{
     }
   };
   
-  const handleDownload = async () => {
-    if (!generatedImage || !containerRef.current) return;
-
-    // If original and no zoom/pan, just download the file directly
-    if (aspectRatio === 'original' && zoomLevel === 1 && pan.x === 0 && pan.y === 0) {
-        const link = document.createElement('a');
-        link.href = generatedImage;
-        link.download = `pandora-look-original-${Date.now()}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
+  const getAspectRatioClass = () => {
+    switch (aspectRatio) {
+        case '9/16': return 'aspect-[9/16]';
+        case '1/1': return 'aspect-square';
+        case '4/5': return 'aspect-[4/5]';
+        default: return '';
     }
+  };
+
+  const handleDownload = async () => {
+    if (!currentImage || !containerRef.current) return;
 
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.src = generatedImage;
+    img.src = currentImage;
     
     await new Promise((resolve) => {
         img.onload = resolve;
@@ -3027,11 +3588,7 @@ const ResultScreen: React.FC<{
     canvas.width = targetWidth;
     canvas.height = targetHeight;
 
-    // Fill background white
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Calculate scaling to fit image into canvas (cover)
+    // Calculate scaling to fill image into canvas (cover)
     const imgAspectRatio = img.naturalWidth / img.naturalHeight;
     const canvasAspectRatio = canvas.width / canvas.height;
     
@@ -3057,7 +3614,6 @@ const ResultScreen: React.FC<{
     const panScaleY = canvas.height / containerHeight;
     ctx.translate(pan.x * panScaleX, pan.y * panScaleY);
     
-    // Draw image centered
     ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     ctx.restore();
 
@@ -3069,19 +3625,11 @@ const ResultScreen: React.FC<{
 
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
-    link.download = `pandora-look-${aspectRatio.replace('/', '-')}-${Date.now()}.png`;
+    const angleLabel = has360Images ? ['frente', 'lado', 'costas'][activeAngleIndex] : 'look';
+    link.download = `pandora-${angleLabel}-${aspectRatio.replace('/', '-')}-${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const getAspectRatioClass = () => {
-    switch (aspectRatio) {
-        case '9/16': return 'aspect-[9/16]';
-        case '1/1': return 'aspect-square';
-        case '4/5': return 'aspect-[4/5]';
-        default: return 'aspect-[3/4]'; // Default display for original, assuming portrait
-    }
   };
 
   return (
@@ -3102,70 +3650,64 @@ const ResultScreen: React.FC<{
       `}</style>
       {/* Image Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-           <img 
-             src={showImageModal} 
-             className="max-w-full max-h-full rounded-lg" 
-             alt="Preview"
-             style={{ touchAction: 'pinch-zoom' }}
-           />
-           
-           {/* Animação de pinça */}
-           {showPinchHint && (
-             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-               <div className="flex flex-col items-center gap-3 animate-fade-in">
-                 <div className="relative w-24 h-24">
-                   {/* Dedo 1 */}
-                   <div style={{
-                     position: 'absolute',
-                     top: '10px',
-                     left: '10px',
-                     width: '28px',
-                     height: '28px',
-                     background: 'white',
-                     borderRadius: '50%',
-                     opacity: 0.9,
-                     animation: 'pinchFinger1 1.5s ease-in-out infinite',
-                   }}/>
-                   {/* Dedo 2 */}
-                   <div style={{
-                     position: 'absolute',
-                     bottom: '10px',
-                     right: '10px',
-                     width: '28px',
-                     height: '28px',
-                     background: 'white',
-                     borderRadius: '50%',
-                     opacity: 0.9,
-                     animation: 'pinchFinger2 1.5s ease-in-out infinite',
-                   }}/>
-                   {/* Linhas conectando */}
-                   <svg width="96" height="96" className="absolute inset-0">
-                     <line x1="24" y1="24" x2="72" y2="72" 
-                       stroke="white" strokeWidth="2" strokeDasharray="4 4" opacity="0.6"/>
-                   </svg>
-                 </div>
-                 <p style={{
-                   color: 'white',
-                   fontSize: '13px',
-                   fontWeight: 'bold',
-                   textAlign: 'center',
-                   background: 'rgba(0,0,0,0.5)',
-                   padding: '8px 16px',
-                   borderRadius: '20px',
-                 }}>
-                   Use 2 dedos para dar zoom
-                 </p>
-               </div>
-             </div>
-           )}
-           
-           <button 
-             onClick={() => setShowImageModal(null)}
-             className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full backdrop-blur-md z-10"
-           >
-             <X size={24} />
-           </button>
+        <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-center">
+            <div 
+              className="w-full h-full relative overflow-hidden flex items-center justify-center touch-none"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleMouseUp}
+              onDoubleClick={() => {
+                if (zoomLevel > 1) {
+                  setZoomLevel(1);
+                  setPan({ x: 0, y: 0 });
+                } else {
+                  setZoomLevel(2.5);
+                }
+              }}
+            >
+            <img 
+              src={showImageModal} 
+              className="max-w-full max-h-full object-contain transition-transform duration-75 ease-linear"
+              style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})` }}
+              draggable={false}
+            />
+
+            {showPinchHint && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative w-24 h-24">
+                    <div className="absolute inset-0 border-4 border-white/40 rounded-full animate-ping"/>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-8">
+                      <div className="w-4 h-4 bg-white rounded-full opacity-90" style={{ animation: 'pinchFinger1 1.5s ease-in-out infinite' }}/>
+                      <div className="w-4 h-4 bg-white rounded-full opacity-90" style={{ animation: 'pinchFinger2 1.5s ease-in-out infinite' }}/>
+                    </div>
+                  </div>
+                  <p className="text-white text-sm font-bold bg-black/50 px-4 py-2 rounded-full">Use 2 dedos para dar zoom</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Action Buttons in Modal */}
+          <div className="absolute bottom-8 left-0 right-0 px-6 flex flex-col gap-3 z-20">
+            <button
+              onClick={onRestart}
+              className="w-full py-3.5 bg-white text-[#6A00F4] border-2 border-[#6A00F4] rounded-2xl text-sm font-bold flex items-center justify-center gap-2"
+            >
+              <RefreshCcw size={18} /> Trocar peça
+            </button>
+          </div>
+          
+          <button 
+            onClick={() => setShowImageModal(null)}
+            className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full backdrop-blur-md z-10"
+          >
+            <X size={24} />
+          </button>
         </div>
       )}
 
@@ -3186,18 +3728,76 @@ const ResultScreen: React.FC<{
             {/* Aspect Ratio Controls */}
             <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
                 <button onClick={() => setAspectRatio('original')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === 'original' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Original</button>
-                <button onClick={() => setAspectRatio('4/5')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Instagram</button>
-                <button onClick={() => setAspectRatio('9/16')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Storys</button>
-                <button onClick={() => setAspectRatio('1/1')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '1/1' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Square</button>
+                <button 
+                  onClick={() => {
+                    if (!isPremiumUser) {
+                      alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                      return;
+                    }
+                    setAspectRatio('4/5');
+                  }} 
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Instagram {!isPremiumUser && '🔒'}
+                </button>
+                <button 
+                  onClick={() => {
+                    if (!isPremiumUser) {
+                      alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                      return;
+                    }
+                    setAspectRatio('9/16');
+                  }} 
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Storys {!isPremiumUser && '🔒'}
+                </button>
+                <button 
+                  onClick={() => {
+                    if (!isPremiumUser) {
+                      alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                      return;
+                    }
+                    setAspectRatio('1/1');
+                  }} 
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '1/1' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Square {!isPremiumUser && '🔒'}
+                </button>
             </div>
+
+            {/* Angle Selection Tabs */}
+            {has360Images && (
+              <div className="flex gap-2 p-1 bg-purple-50 rounded-xl border border-purple-100">
+                <button 
+                  onClick={() => setActiveAngleIndex(0)} 
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeAngleIndex === 0 ? 'bg-[#6A00F4] text-white shadow-md' : 'text-purple-400 hover:bg-purple-100'}`}
+                >
+                  Frente
+                </button>
+                <button 
+                  onClick={() => setActiveAngleIndex(1)} 
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeAngleIndex === 1 ? 'bg-[#6A00F4] text-white shadow-md' : 'text-purple-400 hover:bg-purple-100'}`}
+                >
+                  Lado
+                </button>
+                <button 
+                  onClick={() => setActiveAngleIndex(2)} 
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeAngleIndex === 2 ? 'bg-[#6A00F4] text-white shadow-md' : 'text-purple-400 hover:bg-purple-100'}`}
+                >
+                  Costas
+                </button>
+              </div>
+            )}
 
             {/* Generated Image */}
             <div 
                 ref={containerRef}
-                className={`w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-2xl border-4 border-[#6A00F4] relative bg-gray-100 mb-0 flex-shrink-0 group touch-none transition-all duration-300`}
+                className={`w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-2xl border-4 border-[#6A00F4] relative bg-[#6A00F4]/5 mb-0 flex-shrink-0 group touch-none transition-all duration-300 flex items-center justify-center`}
+                style={aspectRatio === 'original' && naturalAspectRatio ? { aspectRatio: naturalAspectRatio } : {}}
             >
                 <div 
-                    className="w-full h-full overflow-hidden relative cursor-move"
+                    className="w-full h-full overflow-hidden relative cursor-move flex items-center justify-center"
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
@@ -3206,15 +3806,19 @@ const ResultScreen: React.FC<{
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleMouseUp}
                 >
-                    {generatedImage ? (
+                    {currentImage ? (
                         <img 
-                            src={generatedImage} 
+                            src={currentImage} 
                             alt="Look Gerado" 
                             className="w-full h-full object-cover transition-transform duration-75 ease-linear" 
                             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`, transformOrigin: 'center center' }}
                             draggable={false}
+                            onLoad={(e) => {
+                              const img = e.currentTarget;
+                              setNaturalAspectRatio(img.naturalWidth / img.naturalHeight);
+                            }}
                             onDoubleClick={() => {
-                              setShowImageModal(generatedImage);
+                              setShowImageModal(currentImage);
                               setShowTapHint(false);
                               localStorage.setItem('result_hint_visto', 'true');
                             }}
@@ -3227,23 +3831,9 @@ const ResultScreen: React.FC<{
                 </div>
 
                 {showTapHint && (
-                  <div 
-                    className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none z-10"
-                  >
-                    <div style={{
-                      background: 'rgba(0,0,0,0.6)',
-                      backdropFilter: 'blur(4px)',
-                      color: 'white',
-                      padding: '10px 20px',
-                      borderRadius: '30px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      animation: 'pulse 2s ease-in-out infinite',
-                    }}>
-                      <span style={{ fontSize: '18px' }}>👆👆</span>
+                  <div className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none z-10">
+                    <div className="bg-black/60 backdrop-blur-sm text-white px-5 py-2.5 rounded-full text-xs font-bold flex items-center gap-2 animate-pulse">
+                      <span className="text-lg">👆👆</span>
                       Toque 2x para abrir em tela cheia
                     </div>
                   </div>
@@ -3257,12 +3847,14 @@ const ResultScreen: React.FC<{
                     PANDORA AI <Sparkles size={10} />
                 </div>
                 
-                <button 
-                    onClick={onView360}
-                    className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-md px-4 py-2 rounded-full text-xs font-bold text-gray-900 shadow-sm flex items-center gap-2 hover:bg-white transition-colors active:scale-95 transform hover:scale-105 z-20"
-                >
-                    <Rotate3d size={14} /> Veja 360
-                </button>
+                {isPremiumUser && (
+                  <button 
+                      onClick={handleVeja360}
+                      className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-md px-4 py-2 rounded-full text-xs font-bold text-gray-900 shadow-sm flex items-center gap-2 hover:bg-white transition-colors active:scale-95 transform hover:scale-105 z-20"
+                  >
+                      <Rotate3d size={14} /> Veja 360
+                  </button>
+                )}
             </div>
 
 
@@ -3293,53 +3885,18 @@ const ResultScreen: React.FC<{
                     <Download size={18} /> Baixar Imagem
                 </Button>
 
-                {/* Botões de compartilhar */}
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button
-                    onClick={onShareWhatsApp}
-                    style={{
-                      flex: 1,
-                      padding: '14px',
-                      background: '#25D366',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '16px',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                    }}
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => compartilharWhatsApp(generatedImage || '')} 
+                    className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-[#25D366] hover:bg-[#128C7E] text-white border-none"
                   >
-                    WhatsApp
+                    <MessageCircle size={18} /> WhatsApp
                   </button>
-
-                  <button
-                    onClick={() => {
-                      const texto = 'Olha meu novo look com o Pandora AI! 🔥✨ https://pandoravesteai.com';
-                      window.open(`https://www.instagram.com/`, '_blank');
-                      navigator.clipboard?.writeText(texto);
-                      alert('Link copiado! Cole na legenda do Instagram.');
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: '14px',
-                      background: 'linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '16px',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                    }}
+                  <button 
+                    onClick={() => compartilharInstagram()} 
+                    className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-gradient-to-tr from-[#f09433] via-[#e6683c] to-[#bc1888] text-white border-none"
                   >
-                    Instagram
+                    <Instagram size={18} /> Instagram
                   </button>
                 </div>
 
@@ -3348,6 +3905,104 @@ const ResultScreen: React.FC<{
                 </Button>
             </div>
         </div>
+
+        {show360Modal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] p-5">
+            <div className="bg-white rounded-[24px] p-6 max-w-[360px] w-full max-h-[90vh] overflow-y-auto relative">
+              <button 
+                onClick={() => setShow360Modal(false)}
+                className="absolute top-4 right-4 text-gray-400 p-1"
+              >
+                <X size={20} />
+              </button>
+
+              {/* Título */}
+              <div className="text-center mb-4">
+                <div className="text-[32px] mb-2">🔄</div>
+                <h3 className="text-xl font-bold text-gray-900 mb-1.5">
+                  Veja seu Look em 360°!
+                </h3>
+                <p className="text-[13px] text-gray-500 leading-relaxed">
+                  Vire sua roupa em todos os ângulos.<br/>
+                  Exclusivo no <strong className="text-purple-600">Plano Premium</strong>.
+                </p>
+              </div>
+
+              {/* Instrução */}
+              <div className="bg-purple-50 rounded-xl p-3 mb-4 text-xs text-purple-600 font-medium">
+                <strong>📸 Para o melhor resultado, tire 3 fotos:</strong>
+              </div>
+
+              {/* 3 fotos HORIZONTAL */}
+              <div className="flex gap-2 mb-4 justify-center">
+                {/* Frente */}
+                <div className="flex-1 text-center">
+                  <img 
+                    src="https://i.postimg.cc/68g1gWQR/foto-frente.jpg"
+                    alt="Foto de frente"
+                    className="w-full aspect-[4/3] object-cover rounded-lg border-2 border-purple-100"
+                  />
+                  <p className="text-[11px] font-bold text-purple-600 mt-1">✅ Frente</p>
+                </div>
+
+                {/* Lateral */}
+                <div className="flex-1 text-center">
+                  <img 
+                    src="https://i.postimg.cc/c60kV5dV/foto-lateral.jpg"
+                    alt="Foto lateral"
+                    className="w-full aspect-[4/3] object-cover rounded-lg border-2 border-purple-100"
+                  />
+                  <p className="text-[11px] font-bold text-purple-600 mt-1">✅ Lateral</p>
+                </div>
+
+                {/* Costas */}
+                <div className="flex-1 text-center">
+                  <img 
+                    src="https://i.postimg.cc/FYdTjMxP/foto-costas.jpg"
+                    alt="Foto de costas"
+                    className="w-full aspect-[4/3] object-cover rounded-lg border-2 border-purple-100"
+                  />
+                  <p className="text-[11px] font-bold text-purple-600 mt-1">✅ Costas</p>
+                </div>
+              </div>
+
+              {/* Preço */}
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-3 text-center mb-4">
+                <p className="text-[13px] text-gray-500 mb-1">
+                  Acesse o Plano Premium por apenas
+                </p>
+                <p className="text-2xl font-bold text-purple-600">
+                  R$ 29,90
+                </p>
+                <p className="text-[11px] text-purple-400 mt-0.5">
+                  + 360° + formatos Instagram, Stories e Square
+                </p>
+              </div>
+
+              {/* Botão Premium */}
+              <button
+                onClick={() => {
+                  window.open(
+                    'https://pay.cakto.com.br/wsopww7_808505',
+                    '_blank'
+                  );
+                  setShow360Modal(false);
+                }}
+                className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2 shadow-lg shadow-purple-200 active:scale-95 transition-transform mb-2.5"
+              >
+                Quero o Plano Premium 🚀
+              </button>
+
+              {/* Botão fechar */}
+              <button
+                onClick={() => setShow360Modal(false)}
+                className="w-full py-3 bg-transparent text-gray-400 text-sm font-medium hover:text-gray-600 transition-colors"
+              >
+                Agora não
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3535,6 +4190,7 @@ const App: React.FC = () => {
   const [novaSenhaRedefinir, setNovaSenhaRedefinir] = useState('');
   const [confirmarNovaSenhaRedefinir, setConfirmarNovaSenhaRedefinir] = useState('');
   const [isFirstLogin, setIsFirstLogin] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<'original' | '9/16' | '1/1' | '4/5'>('original');
 
   const [userState, setUserState] = useState<UserState>({
     email: '',
@@ -3561,25 +4217,26 @@ const App: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user && user.email) {
         const userEmail = user.email.toLowerCase().trim();
-        setUserId(userEmail);
+        setUserId(user.uid);
 
         try {
-          const userRef = doc(db, 'users', userEmail);
+          const userRef = doc(db, 'users', user.uid);
           const userSnap = await getDoc(userRef);
 
           if (userSnap.exists()) {
             const userData = userSnap.data();
+            const plan = userData.lastPurchasePlan || 'basic';
             setUserState(prev => ({
               ...prev,
               email: userEmail,
               credits: userData.credits ?? 0,
               name: userData.nome || userData.name || '',
-              lastPlan: userData.lastPurchasePlan || userData.lastPlan || null,
+              lastPlan: plan,
             }));
 
             setTimeout(async () => {
-              if (userEmail) {
-                await requestNotificationPermission(userEmail);
+              if (user.uid) {
+                await requestNotificationPermission(user.uid);
               }
             }, 3000);
 
@@ -3588,7 +4245,7 @@ const App: React.FC = () => {
               const { getDocs, collection, orderBy, query, limit } = 
                 await import('firebase/firestore');
               
-              const historyRef = collection(db, 'users', userEmail, 'history');
+              const historyRef = collection(db, 'users', user.uid, 'history');
               const q = query(historyRef, orderBy('date', 'desc'), limit(50));
               const snapshot = await getDocs(q);
               
@@ -3619,7 +4276,7 @@ const App: React.FC = () => {
                 : prev
             );
 
-            const jaViuGuia = localStorage.getItem(`guia_visto_${userEmail}`);
+            const jaViuGuia = localStorage.getItem(`guia_visto_${user.uid}`);
             if (!jaViuGuia) {
               setIsFirstLogin(true);
             }
@@ -3667,6 +4324,8 @@ const App: React.FC = () => {
     }
   }, []);
 
+
+  const isPremiumUser = userState.lastPlan === 'Premium' || userState.lastPlan === 'premium' || userState.lastPlan === '30';
 
   const getUserName = () => {
     if (userState.name) return userState.name;
@@ -3741,10 +4400,13 @@ const App: React.FC = () => {
 
   const handleLogin = async (email: string, userIdFromLogin: string) => {
     const userEmail = email.toLowerCase().trim();
-    setUserId(userEmail);
+    const user = auth.currentUser;
+    if (!user) return;
+    
+    setUserId(user.uid);
     
     try {
-      const userRef = doc(db, 'users', userEmail);
+      const userRef = doc(db, 'users', user.uid);
       let userSnap = await getDoc(userRef);
       
       // Verificar se documento existe, se não, criar (migração)
@@ -3752,10 +4414,11 @@ const App: React.FC = () => {
         await setDoc(userRef, {
           email: userEmail,
           nome: 'Usuário',
+          uid: user.uid,
           credits: 10,
           created_at: serverTimestamp()
         });
-        console.log('Usuário migrado/criado no Firestore via Login:', userEmail);
+        console.log('Usuário migrado/criado no Firestore via Login:', user.uid);
         // Busca o documento recém criado
         userSnap = await getDoc(userRef);
       }
@@ -3771,7 +4434,7 @@ const App: React.FC = () => {
       setScreen(Screen.ONBOARDING);
     } catch (error) {
       console.error('Erro ao processar login no Firestore:', error);
-      handleFirestoreError(error, OperationType.GET, `users/${userEmail}`);
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     }
 
     // Solicita permissões de notificação e instalação PWA
@@ -3783,7 +4446,7 @@ const App: React.FC = () => {
           // Registra o token FCM
           const token = await getMessagingToken();
           if (token) {
-            await saveUserToken(userEmail, token);
+            await saveUserToken(user.uid, token);
           }
         }
       }
@@ -3923,6 +4586,7 @@ const App: React.FC = () => {
     }
 
     setLoadingMessage("A IA está criando o seu look...");
+    setAspectRatio('original');
     setUserState(prev => ({ ...prev, clothingImage: clothingImageUrl }));
     setScreen(Screen.LOADING);
 
@@ -3957,8 +4621,12 @@ const App: React.FC = () => {
         const { url } = resultado.data as { url: string };
         setUrlPublicaImagem(url);
         
-      } catch (error) {
-        console.error('Erro ao salvar imagem no Storage:', error);
+      } catch (error: any) {
+        console.error('Erro detalhado ao salvar imagem no Storage:', {
+          message: error.message,
+          code: error.code,
+          details: error.details
+        });
         setUrlPublicaImagem('');
       }
 
@@ -4013,20 +4681,51 @@ const App: React.FC = () => {
   };
 
   const handleGenerate360 = async (sideImgUrl: string, backImgUrl: string) => {
+     if (userState.credits < 20) {
+       alert('⚠️ Você precisa de pelo menos 20 créditos para gerar a visualização 360°.');
+       handleOpenCredits();
+       return;
+     }
+
      setLoadingMessage("Gerando visualização 360°...");
+     setAspectRatio('original');
      setUserState(prev => ({ ...prev, sideImage: sideImgUrl, backImage: backImgUrl }));
      setScreen(Screen.LOADING);
      
      // Preparar Base64 para as 3 imagens
-     const frontB64 = userState.uploadedImage ? await urlToBase64(userState.uploadedImage) : "";
-     const sideB64 = await urlToBase64(sideImgUrl);
-     const backB64 = await urlToBase64(backImgUrl);
-     const clothingB64 = userState.clothingImage ? await urlToBase64(userState.clothingImage) : "";
+     // Se já temos a imagem gerada de frente, não precisamos gerar de novo
+     const frontB64Raw = userState.generatedImage ? null : (userState.uploadedImage ? await urlToBase64(userState.uploadedImage) : "");
+     const sideB64Raw = await urlToBase64(sideImgUrl);
+     const backB64Raw = await urlToBase64(backImgUrl);
+     const clothingB64Raw = userState.clothingImage ? await urlToBase64(userState.clothingImage) : "";
 
-     if (frontB64 && sideB64 && backB64 && clothingB64) {
-        const results = await generate360View(frontB64, sideB64, backB64, clothingB64, userState.selectedCategory || "clothes");
-        setUserState(prev => ({ ...prev, generated360Images: results }));
-        setScreen(Screen.RESULT_360);
+     // Comprimir para evitar erro de payload muito grande e timeout
+     const frontB64 = frontB64Raw ? await compressImage(`data:image/jpeg;base64,${frontB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]) : null;
+     const sideB64 = await compressImage(`data:image/jpeg;base64,${sideB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]);
+     const backB64 = await compressImage(`data:image/jpeg;base64,${backB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]);
+     const clothingB64 = await compressImage(`data:image/jpeg;base64,${clothingB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]);
+
+     if (sideB64 && backB64 && clothingB64) {
+        try {
+          const results = await generate360View(frontB64, sideB64, backB64, clothingB64, userState.selectedCategory || "clothes");
+          
+          // Se pulamos a geração da frente, usamos a imagem que já temos
+          const finalResults = [...results];
+          if (frontB64 === null && userState.generatedImage) {
+            finalResults[0] = userState.generatedImage;
+          }
+          
+          // Deduct 20 credits
+          if (userId) {
+            await deductCredit(userId, 20);
+          }
+          
+          setUserState(prev => ({ ...prev, generated360Images: finalResults, credits: prev.credits - 20 }));
+          setScreen(Screen.RESULT_360);
+        } catch (error) {
+          console.error('Erro ao gerar 360:', error);
+          setScreen(Screen.VIEW_360);
+        }
      } else {
         setScreen(Screen.VIEW_360); // Error fallback
      }
@@ -4110,17 +4809,19 @@ const App: React.FC = () => {
       const emailLower = cadastroEmail.toLowerCase().trim();
       
       // Cria nova conta
-      await createUserWithEmailAndPassword(auth, emailLower, cadastroSenha);
+      const result = await createUserWithEmailAndPassword(auth, emailLower, cadastroSenha);
+      const user = result.user;
       
-      // Cria documento no Firestore com créditos iniciais
-      const userRef = doc(db, 'users', emailLower);
+      // Cria documento no Firestore com créditos iniciais usando UID como ID
+      const userRef = doc(db, 'users', user.uid);
       await setDoc(userRef, {
         email: emailLower,
         nome: cadastroNome,
+        uid: user.uid,
         credits: 10,
         created_at: serverTimestamp()
       });
-      console.log('Novo usuário criado no Firestore via Cadastro:', emailLower);
+      console.log('Novo usuário criado no Firestore via Cadastro:', user.uid);
 
       // Envia email de boas-vindas
       try {
@@ -4135,7 +4836,9 @@ const App: React.FC = () => {
       }
       
       // Cria documento no Firestore e inicializa créditos
-      setUserId(emailLower);
+      if (auth.currentUser) {
+        setUserId(auth.currentUser.uid);
+      }
       
       setUserState(prev => ({ 
         ...prev, 
@@ -4175,10 +4878,10 @@ const App: React.FC = () => {
       }
       
       const userEmail = user.email.toLowerCase().trim();
-      setUserId(userEmail);
+      setUserId(user.uid);
       
       // Verificar se usuário já existe no Firestore
-      const userRef = doc(db, 'users', userEmail);
+      const userRef = doc(db, 'users', user.uid);
       const userSnap = await getDoc(userRef);
       let credits = 10;
       let name = user.displayName || 'Usuário';
@@ -4188,10 +4891,11 @@ const App: React.FC = () => {
         await setDoc(userRef, {
           email: userEmail,
           nome: name,
+          uid: user.uid,
           credits: 10,
           created_at: serverTimestamp()
         });
-        console.log('Novo usuário criado no Firestore via Google (Cadastro):', userEmail);
+        console.log('Novo usuário criado no Firestore via Google (Cadastro):', user.uid);
       } else {
         const userData = userSnap.data();
         credits = userData.credits ?? 0;
@@ -4254,66 +4958,12 @@ const App: React.FC = () => {
     }
   };
 
-  const compartilharWhatsApp = async () => {
-    try {
-      const imagemGerada = userState.generatedImage;
-      if (!imagemGerada) return;
-
-      const response = await fetch(imagemGerada);
-      const blob = await response.blob();
-      const file = new File(
-        [blob],
-        'meu-look-pandora.jpg',
-        { type: 'image/jpeg' }
-      );
-
-      const texto = 
-        'Olha como ficou meu novo look com o ' +
-        'Pandora AI! 🔥✨ Experimente você ' +
-        'também: https://pandoravesteai.com';
-
-      if (
-        navigator.canShare && 
-        navigator.canShare({ files: [file] })
-      ) {
-        await navigator.share({
-          files: [file],
-          title: 'Pandora AI',
-          text: texto
-        });
-      } else {
-        // Fallback: baixa foto + abre WhatsApp
-        const link = document.createElement('a');
-        link.href = imagemGerada;
-        link.download = 'meu-look-pandora.jpg';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        setTimeout(() => {
-          window.open(
-            `https://wa.me/?text=${encodeURIComponent(texto)}`,
-            '_blank'
-          );
-        }, 1500);
-      }
-    } catch (error) {
-      const texto = encodeURIComponent(
-        'Olha como ficou meu novo look com o ' +
-        'Pandora AI! 🔥✨ Experimente você ' +
-        'também: https://pandoravesteai.com'
-      );
-      window.open(
-        `https://wa.me/?text=${texto}`,
-        '_blank'
-      );
-    }
-  };
 
   const renderScreen = () => {
     let content = null;
     let showBanner = true;
     let onBack = undefined;
+    let backIcon: 'arrow' | 'x' = 'arrow';
 
     switch (screen) {
       case Screen.SPLASH:
@@ -4485,6 +5135,7 @@ const App: React.FC = () => {
              userName={getUserName()} 
              onOpenFAQ={handleOpenFAQ}
              isFirstLogin={isFirstLogin}
+             isPremium={isPremiumUser}
              onGuiaVisto={() => {
                setIsFirstLogin(false);
                localStorage.setItem(`guia_visto_${userId}`, 'true');
@@ -4525,6 +5176,7 @@ const App: React.FC = () => {
             onRestart={handleRestart}
             onBack={() => setScreen(Screen.CATEGORY)}
             loading={false}
+            isPremium={isPremiumUser}
           />
         );
         onBack = () => setScreen(Screen.CATEGORY);
@@ -4546,10 +5198,12 @@ const App: React.FC = () => {
             onRestart={handleRestart}
             onView360={handleView360}
             onBack={() => setScreen(Screen.CATEGORY)}
-            onShareWhatsApp={compartilharWhatsApp}
+            userState={userState}
+            aspectRatio={aspectRatio}
+            setAspectRatio={setAspectRatio}
           />
         );
-        onBack = () => setScreen(Screen.CATEGORY);
+        onBack = () => setScreen(Screen.RESULT);
         break;
       case Screen.VIEW_360:
          content = (
@@ -4560,16 +5214,21 @@ const App: React.FC = () => {
            />
          );
          onBack = () => setScreen(Screen.RESULT);
+         backIcon = 'x';
          break;
       case Screen.RESULT_360:
          content = (
            <Result360Screen 
              images={userState.generated360Images}
              onRestart={handleRestart}
-             onBack={handleBackToHome}
+             onBack={() => setScreen(Screen.RESULT)}
+             userState={userState}
+             aspectRatio={aspectRatio}
+             setAspectRatio={setAspectRatio}
            />
          );
-         onBack = handleBackToHome;
+         onBack = () => setScreen(Screen.RESULT);
+         backIcon = 'x';
          break;
       default:
         return (
@@ -4591,7 +5250,9 @@ const App: React.FC = () => {
           onOpenCredits={handleOpenCredits} 
           onOpenFAQ={handleOpenFAQ}
           showBanner={showBanner}
+          isPremium={isPremiumUser}
           onBack={onBack}
+          backIcon={backIcon}
         >
           {content}
         </MainLayout>

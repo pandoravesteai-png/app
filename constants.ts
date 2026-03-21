@@ -32,11 +32,6 @@ export const CATEGORIES: CategoryItem[] = [
     image: 'https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=500&q=80',
     badge: 'Novo'
   },
-  { 
-    id: 'sapatos', 
-    label: 'Tênis + Sapatos', 
-    image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=500&q=80' 
-  },
 ];
 
 export const LOGIN_BG_IMAGES = [

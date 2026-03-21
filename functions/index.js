@@ -1,10 +1,12 @@
-const { onCall, onRequest } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { GoogleAuth } = require("google-auth-library");
 const admin = require("firebase-admin");
 
 // Inicializa Firebase Admin
 if (!admin.apps.length) {
-  admin.initializeApp();
+  admin.initializeApp({
+    storageBucket: "pandora-ai-7c070.firebasestorage.app"
+  });
 }
 
 const PROJECT_ID = "pandora-ai-7c070";
@@ -29,7 +31,7 @@ exports.gerarTryOn = onCall({
 }, async (request) => {
   try {
     const { urlFotoCliente, urlFotoRoupa } = request.data;
-    if (!urlFotoCliente || !urlFotoRoupa) throw new Error("Envie as duas imagens.");
+    if (!urlFotoCliente || !urlFotoRoupa) throw new HttpsError("invalid-argument", "Envie as duas imagens.");
     
     const limparBase64 = (str) => str.includes(",") ? str.split(",")[1] : str;
     const accessToken = await getAccessToken();
@@ -57,139 +59,327 @@ exports.gerarTryOn = onCall({
     });
     
     const resultado = await response.json();
-    if (!response.ok) throw new Error(resultado.error?.message || "Erro na API.");
+    if (!response.ok) throw new HttpsError("internal", resultado.error?.message || "Erro na API.");
     
     const imagemBase64 = resultado.predictions?.[0]?.bytesBase64Encoded;
-    if (!imagemBase64) throw new Error("Nenhuma imagem gerada.");
+    if (!imagemBase64) throw new HttpsError("not-found", "Nenhuma imagem gerada.");
     
     return { sucesso: true, imagemGerada: `data:image/png;base64,${imagemBase64}` };
   } catch (error) {
-    console.error("Erro:", error.message);
-    return { sucesso: false, erro: error.message };
+    console.error("Erro em gerarTryOn:", error);
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("internal", error.message);
   }
 });
 
-// ========== FUNÇÃO 2: CRIAR PAGAMENTO ==========
-exports.criarPagamento = onCall({
-  region: 'us-central1',
+// ========== FUNÇÃO 1.1: GERAR 360 VIEW ==========
+exports.gerar360View = onCall({
+  memory: "2GiB",
+  timeoutSeconds: 300,
+  region: "us-central1",
 }, async (request) => {
-  const { userId, plan, userEmail } = request.data;
-  const amount = plan === '20' ? 1990 : 2990;
-  const credits = plan === '20' ? 20 : 30;
-
+  console.log("🚀 Iniciando gerar360View...");
   try {
-    const response = await fetch('https://api.abacatepay.com/v1/billing/create', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer abc_dev_qeMChtHJdjFJsjQzzsqUCgur',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        frequency: 'ONE_TIME',
-        methods: ['PIX'],
-        products: [{
-          externalId: plan === '20' ? 'prod_sX2xfLW0Pqjmcg2DRPM5SnYR' : 'prod_gne1zpe0ARwQp2AcKSdzYSAK',
-          name: `${credits} Créditos Pandora AI`,
-          quantity: 1,
-          price: amount,
-        }],
-        customer: {
-          name: userEmail || 'Cliente Pandora AI',
-          cellphone: '83999999999',
-          email: userEmail,
-        },
-        returnUrl: `https://pandora-ai-7c070.web.app?payment=success&userId=${userId}&credits=${credits}`,
-        completionUrl: `https://pandora-ai-7c070.web.app?payment=success&userId=${userId}&credits=${credits}`,
-      }),
-    });
-
-    const data = await response.json();
-    const url = data?.data?.url;
-    if (!url) {
-      console.error('AbacatePay Error:', data);
-      throw new Error('URL de pagamento não gerada');
+    const { frontImageB64, sideImageB64, backImageB64, clothingImageB64 } = request.data;
+    if (!sideImageB64 || !backImageB64 || !clothingImageB64) {
+      throw new HttpsError("invalid-argument", "Envie pelo menos as imagens de Lado, Costas e a Roupa.");
     }
-    return { url };
+    
+    const limparBase64 = (str) => {
+      if (!str) return null;
+      return str.includes(",") ? str.split(",")[1] : str;
+    };
+    const accessToken = await getAccessToken();
+    
+    const chamarVertexAI = async (personImageB64, label) => {
+      if (!personImageB64) return null;
+      console.log(`📸 Gerando ângulo: ${label}...`);
+      
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { 
+            "Authorization": `Bearer ${accessToken}`, 
+            "Content-Type": "application/json" 
+          },
+          body: JSON.stringify({
+            instances: [{
+              personImage: { image: { bytesBase64Encoded: limparBase64(personImageB64) } },
+              productImages: [{ image: { bytesBase64Encoded: limparBase64(clothingImageB64) } }],
+            }],
+            parameters: { 
+              sampleCount: 1, 
+              baseSteps: 40,
+              personGeneration: "allow_adult", 
+              safetySetting: "block_only_high", 
+              addWatermark: false,
+              guidanceScale: 7.5
+            },
+          }),
+        });
+        
+        const contentType = response.headers.get("content-type");
+        let resultado;
+        
+        if (contentType && contentType.includes("application/json")) {
+          resultado = await response.json();
+        } else {
+          const text = await response.text();
+          console.error(`❌ Resposta não-JSON da Vertex AI (${label}):`, text);
+          throw new Error(`Resposta inválida da API (Status: ${response.status})`);
+        }
+
+        if (!response.ok) {
+          console.error(`❌ Erro Vertex AI (${label}) - Status ${response.status}:`, JSON.stringify(resultado));
+          const msg = resultado.error?.message || `Erro na API Vertex (Status: ${response.status})`;
+          throw new Error(msg);
+        }
+        
+        const imagemBase64 = resultado.predictions?.[0]?.bytesBase64Encoded;
+        if (!imagemBase64) {
+          console.error(`❌ Sem predições para ${label}:`, JSON.stringify(resultado));
+          throw new Error(`Nenhuma imagem gerada para o ângulo ${label}`);
+        }
+        
+        return `data:image/png;base64,${imagemBase64}`;
+      } catch (err) {
+        console.error(`💥 Exceção em chamarVertexAI (${label}):`, err);
+        throw err;
+      }
+    };
+
+    // Chamadas sequenciais para evitar limites de cota e instabilidade
+    // Se frontImageB64 for fornecido, gera. Se não, retorna null na primeira posição.
+    const base64frente = frontImageB64 ? await chamarVertexAI(frontImageB64, "frente") : null;
+    
+    // Pequeno delay entre chamadas para evitar sobrecarga
+    await new Promise(resolve => setTimeout(resolve, 8000));
+    const base64lateral = await chamarVertexAI(sideImageB64, "lateral");
+    
+    await new Promise(resolve => setTimeout(resolve, 8000));
+    const base64costas = await chamarVertexAI(backImageB64, "costas");
+    
+    console.log("✅ Imagens 360 processadas!");
+    return { 
+      sucesso: true, 
+      imagens: [base64frente, base64lateral, base64costas] 
+    };
   } catch (error) {
-    console.error('Function Error:', error);
-    throw error;
+    console.error("💥 Erro fatal em gerar360View:", error);
+    
+    // Se for um erro do Firebase Functions, repassa
+    if (error instanceof HttpsError) throw error;
+    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // Se for um erro de timeout (comum em 360)
+    if (errorMessage.includes("timeout") || errorMessage.includes("deadline")) {
+      throw new HttpsError("deadline-exceeded", "O processamento 360 excedeu o tempo limite. Tente novamente.");
+    }
+    
+    // Caso contrário, erro interno com mensagem detalhada
+    throw new HttpsError("internal", `Erro no processamento 360: ${errorMessage}`);
   }
 });
 
-// ========== FUNÇÃO 3: WEBHOOK PAGAMENTO (NOVA!) ==========
-exports.webhookPagamento = onRequest({ 
+// ========== FUNÇÃO 3: WEBHOOK CAKTO (CORRIGIDO) ==========
+exports.webhookCakto = onRequest({ 
   region: "us-central1",
   cors: true 
 }, async (req, res) => {
+  console.log('🔔 WEBHOOK CAKTO - BUSCA POR EMAIL');
+  console.log('📅 Timestamp:', new Date().toISOString());
+  
   try {
-    console.log("📩 Webhook recebido:", JSON.stringify(req.body));
-    
     const { event, data } = req.body;
     
-    // Verifica se é um pagamento confirmado
-    if (event === "billing.paid") {
-      const email = data?.customer?.email;
-      const amount = data?.products?.[0]?.price || 0;
-      
-      // Determina quantos créditos dar baseado no valor
-      let credits = 0;
-      if (amount === 1990) credits = 20;
-      if (amount === 2990) credits = 30;
-      
-      console.log(`💰 Pagamento detectado: ${email} - R$${amount/100} - ${credits} créditos`);
-      
-      if (email && credits > 0) {
-        // Busca usuário por email no Firestore
-        const usersRef = admin.firestore().collection("users");
-        const snapshot = await usersRef.where("email", "==", email).get();
-        
-        if (!snapshot.empty) {
-          const userDoc = snapshot.docs[0];
-          await userDoc.ref.update({
-            credits: admin.firestore.FieldValue.increment(credits)
-          });
-          console.log(`✅ ${credits} créditos adicionados para ${email}`);
-        } else {
-          console.warn(`⚠️ Usuário não encontrado no Firestore: ${email}`);
-        }
-      }
+    console.log('📦 Event:', event);
+    console.log('📊 Data recebida:', JSON.stringify(data, null, 2));
+    
+    if (event !== 'purchase_approved') {
+      console.log('⚠️ Evento ignorado:', event);
+      return res.status(200).json({
+        success: true,
+        message: 'Evento ignorado'
+      });
     }
     
-    res.status(200).send("ok");
+    const { customer, amount, status, id: orderId, refId, paymentMethod } = data;
+    const email = customer?.email;
+    
+    console.log('📧 Email:', email);
+    console.log('💰 Valor:', amount);
+    console.log('📦 Status:', status);
+    
+    if (!email) {
+      console.error('❌ Email não encontrado');
+      return res.status(400).json({ success: false, error: 'Email não encontrado' });
+    }
+    
+    if (status !== 'paid') {
+      console.log('⚠️ Status não é paid:', status);
+      return res.status(200).json({ success: true, message: 'Pagamento não aprovado' });
+    }
+    
+    const valor = parseFloat(
+      String(amount).replace(',', '.')
+    );
+    
+    console.log('💵 Valor raw:', amount);
+    console.log('💵 Valor convertido:', valor);
+    
+    let plano = '';
+    let creditos = 0;
+    
+    if (valor >= 19.80 && valor <= 20.10) {
+      plano = 'Básico';
+      creditos = 100;
+    } else if (valor >= 29.80 && valor <= 30.10) {
+      plano = 'Premium';
+      creditos = 300;
+    } else {
+      console.error('❌ Valor inválido:', valor);
+      return res.status(400).json({ success: false, error: 'Valor inválido' });
+    }
+    
+    console.log('✅ Plano:', plano);
+    console.log('💎 Créditos:', creditos);
+    
+    try {
+      // ========== BUSCAR USUÁRIO POR EMAIL (NÃO USAR EMAIL COMO ID) ==========
+      const db = admin.firestore();
+      console.log('✅ Usando banco padrão do Firestore');
+      
+      // BUSCAR usuário pelo campo 'email'
+      const usersRef = db.collection('users');
+      const snapshot = await usersRef.where('email', '==', email).get();
+      
+      let userRef;
+      let creditosAtuais = 0;
+      let userDocId = '';
+      
+      if (!snapshot.empty) {
+        // Usuário encontrado! Usar documento existente (UID)
+        const userDoc = snapshot.docs[0];
+        userRef = userDoc.ref;
+        userDocId = userDoc.id;
+        creditosAtuais = userDoc.data().credits || 0;
+        console.log('✅ Usuário encontrado! ID:', userDocId);
+        console.log('📊 Créditos atuais:', creditosAtuais);
+      } else {
+        // Usuário não existe
+        console.log('⚠️ Usuário não encontrado, criando novo');
+        userRef = usersRef.doc();
+        userDocId = userRef.id;
+        creditosAtuais = 0;
+      }
+      
+      const novoTotal = creditosAtuais + creditos;
+      console.log('➕ Adicionando:', creditos);
+      console.log('🎯 Novo total:', novoTotal);
+      
+      // Atualizar documento EXISTENTE
+      await userRef.set({
+        email: email,
+        nome: customer?.name || '',
+        credits: novoTotal,
+        lastPurchase: admin.firestore.FieldValue.serverTimestamp(),
+        lastPurchaseAmount: valor,
+        lastPurchasePlan: plano,
+        lastPurchaseOrderId: orderId || '',
+        lastPurchaseRefId: refId || '',
+        lastPurchaseCredits: creditos,
+        lastPurchasePaymentMethod: paymentMethod || ''
+      }, { merge: true });
+      
+      console.log('✅ Documento atualizado:', userDocId);
+      
+      // Salvar histórico
+      await db.collection('payment_history').add({
+        userId: email,
+        userDocId: userDocId,
+        transactionId: orderId || '',
+        refId: refId || '',
+        amount: valor,
+        credits: creditos,
+        plan: plano,
+        status: status,
+        paymentMethod: paymentMethod || '',
+        caktoData: data,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      console.log('✅ SUCESSO!');
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Créditos adicionados',
+        data: {
+          email: email,
+          userDocId: userDocId,
+          plano: plano,
+          creditosAdicionados: creditos,
+          creditosAnteriores: creditosAtuais,
+          creditosNovos: novoTotal,
+          orderId: orderId || '',
+          refId: refId || ''
+        }
+      });
+      
+    } catch (firestoreError) {
+      console.error('❌ Erro Firestore:', firestoreError);
+      return res.status(500).json({
+        success: false,
+        error: 'Erro ao atualizar: ' + firestoreError.message
+      });
+    }
+    
   } catch (error) {
-    console.error("❌ Erro no webhook:", error);
-    res.status(500).send("error");
+    console.error('❌ Erro geral:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
-// ========== FUNÇÃO 4: SALVAR IMAGEM NO STORAGE (NOVA!) ==========
+// ========== FUNÇÃO 4: SALVAR IMAGEM NO STORAGE ==========
 exports.salvarImagemStorage = onCall({
   region: "us-central1",
 }, async (request) => {
   if (!request.auth) {
-    throw new Error("Usuário não autenticado");
+    console.error("Tentativa de salvamento sem autenticação");
+    throw new HttpsError("unauthenticated", "Usuário não autenticado");
   }
 
   try {
     const { imagemBase64, userId } = request.data;
-    if (!imagemBase64 || !userId) throw new Error("Dados incompletos.");
+    if (!imagemBase64 || !userId) {
+      console.error("Dados incompletos recebidos:", { hasImage: !!imagemBase64, userId });
+      throw new HttpsError("invalid-argument", "Dados incompletos.");
+    }
     
     const bucket = admin.storage().bucket();
     const nomeArquivo = `looks/${userId}/${Date.now()}.jpg`;
     const arquivo = bucket.file(nomeArquivo);
 
-    // Remove prefixo base64 se existir
+    console.log(`Tentando salvar imagem para o usuário ${userId} no caminho ${nomeArquivo}`);
+
     const base64Data = imagemBase64.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // Salva no Storage
     await arquivo.save(buffer, {
-      metadata: { contentType: 'image/jpeg' },
-      public: true
+      metadata: { 
+        contentType: 'image/jpeg',
+        metadata: {
+          firebaseStorageDownloadTokens: Date.now().toString()
+        }
+      }
     });
 
-    // Retorna URL pública
-    const urlPublica = `https://storage.googleapis.com/${bucket.name}/${nomeArquivo}`;
+    console.log(`Imagem salva com sucesso: ${nomeArquivo}`);
+
+    const urlPublica = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(nomeArquivo)}?alt=media`;
 
     return { 
       sucesso: true, 
@@ -197,7 +387,7 @@ exports.salvarImagemStorage = onCall({
     };
 
   } catch (error) {
-    console.error('Erro ao salvar imagem:', error);
-    throw new Error('Erro ao salvar imagem');
+    console.error('Erro detalhado ao salvar imagem:', error);
+    throw new HttpsError('internal', `Erro ao salvar imagem: ${error.message}`);
   }
 });

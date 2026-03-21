@@ -57,4 +57,4 @@ export interface CategoryItem {
   badge?: string;
 }
 
-export type ClothingType = 'Blusa' | 'Short' | 'Calça' | 'Saia' | 'Vestido' | 'Sapatos';
+export type ClothingType = 'Blusa' | 'Short' | 'Calça' | 'Saia' | 'Vestido';

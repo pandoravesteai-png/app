@@ -2,29 +2,35 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Usuário acessa apenas seu próprio documento
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email != null && request.auth.token.email.lower() == userId.lower()));
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+         (request.auth.token.email == "pandoravesteai@gmail.com" && request.auth.token.email_verified == true));
+    }
+
     match /users/{userId} {
-      allow read, write: if request.auth != null && 
-        (request.auth.uid == userId || 
-         request.auth.token.email == userId);
+      allow read, write: if isOwner(userId) || isAdmin();
       
-      // Subcoleções do usuário
       match /{subcollection}/{docId} {
-        allow read, write: if request.auth != null && 
-          (request.auth.uid == userId || 
-           request.auth.token.email == userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
     }
     
-    // Avaliações — qualquer usuário logado pode criar
     match /avaliacoes/{docId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow read, create: if isAuthenticated();
+      allow update, delete: if isAdmin();
     }
-    
-    // Histórico de looks
+
     match /historico/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAuthenticated();
     }
   }
 }

@@ -1,25 +1,26 @@
 import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 
-export const getOrCreateUserCredits = async (userId: string): Promise<number> => {
+export const getOrCreateUserCredits = async (
+  userId: string
+): Promise<number> => {
   const userRef = doc(db, 'users', userId);
   try {
     const userSnap = await getDoc(userRef);
-    
     if (!userSnap.exists()) {
       const email = auth.currentUser?.email || '';
       await setDoc(userRef, { 
-        email,
+        email: auth.currentUser?.email || '',
+        uid: userId,
         credits: 10, 
         createdAt: new Date().toISOString() 
       });
       return 10;
     }
-    
     return userSnap.data().credits || 0;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `users/${userId}`);
-    return 0; // Unreachable
+    console.error('Erro ao buscar créditos:', error);
+    return 0;
   }
 };
 
@@ -30,7 +31,8 @@ export const saveUserEmail = async (userId: string, email: string): Promise<void
     
     if (!userSnap.exists()) {
       await setDoc(userRef, { 
-        email, 
+        email: auth.currentUser?.email || email,
+        uid: userId,
         credits: 10, 
         createdAt: new Date().toISOString() 
       });
@@ -42,27 +44,38 @@ export const saveUserEmail = async (userId: string, email: string): Promise<void
   }
 };
 
-export const deductCredit = async (userId: string, amount: number = 10): Promise<boolean> => {
+export const deductCredit = async (
+  userId: string, 
+  amount: number = 10
+): Promise<boolean> => {
   const userRef = doc(db, 'users', userId);
   try {
     const userSnap = await getDoc(userRef);
-    
-    if (!userSnap.exists() || (userSnap.data().credits || 0) < amount) return false;
-    
-    await updateDoc(userRef, { credits: increment(-amount) });
+    if (!userSnap.exists() || 
+        (userSnap.data().credits || 0) < amount) {
+      return false;
+    }
+    await updateDoc(userRef, { 
+      credits: increment(-amount) 
+    });
     return true;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
+    console.error('Erro ao deduzir crédito:', error);
     return false;
   }
 };
 
-export const addCredits = async (userId: string, amount: number): Promise<void> => {
+export const addCredits = async (
+  userId: string, 
+  amount: number
+): Promise<void> => {
   const userRef = doc(db, 'users', userId);
   try {
-    await updateDoc(userRef, { credits: increment(amount) });
+    await updateDoc(userRef, { 
+      credits: increment(amount) 
+    });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
+    console.error('Erro ao adicionar créditos:', error);
   }
 };
 
