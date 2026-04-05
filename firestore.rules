@@ -6,24 +6,35 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email != null && request.auth.token.email.lower() == userId.lower()));
-    }
-
     function isAdmin() {
-      return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
-         (request.auth.token.email == "pandoravesteai@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "pandoravesteai@gmail.com" && request.auth.token.email_verified == true));
     }
 
     match /users/{userId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      // Permite ler se estiver autenticado (necessário para a query de migração por email)
+      allow read: if isAuthenticated();
+      
+      // Permite criar se for o próprio UID, se for admin, ou se o email bater (migração)
+      allow create: if isAuthenticated() && 
+                     (request.auth.uid == userId || 
+                      isAdmin() || 
+                      (request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()));
+      
+      // Permite atualizar ou deletar se for o dono, admin, ou se o documento pertencer ao email do usuário (migração)
+      allow update, delete: if isAuthenticated() && 
+                             (request.auth.uid == userId || 
+                              isAdmin() || 
+                              (resource != null && resource.data.email != null && resource.data.email.lower() == request.auth.token.email.lower()) ||
+                              (resource != null && resource.id == request.auth.uid));
       
       match /{subcollection}/{docId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read: if isAuthenticated() && (userId == request.auth.uid || isAdmin());
+        allow write: if isAuthenticated() && (userId == request.auth.uid || isAdmin());
       }
     }
-    
+
     match /avaliacoes/{docId} {
       allow read, create: if isAuthenticated();
       allow update, delete: if isAdmin();
@@ -31,6 +42,15 @@ service cloud.firestore {
 
     match /historico/{docId} {
       allow read, write: if isAuthenticated();
+    }
+
+    match /api_usage/{docId} {
+      allow read, write: if isAdmin();
+    }
+    
+    match /transactions/{docId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
     }
   }
 }

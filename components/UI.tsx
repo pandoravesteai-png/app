@@ -5,46 +5,50 @@ import { Loader2 } from 'lucide-react';
 export const AppLogo: React.FC<{ size?: 'sm' | 'md' | 'lg', hideSlogan?: boolean }> = ({ size = 'lg', hideSlogan = false }) => {
   // Configuração para exibir a logo respeitando seu formato original.
   // 'lg': Splash Screen (Grande)
-  // 'md': Login Screen (Médio - aprox 50% do lg)
+  // 'md': Login Screen (Médio)
   // 'sm': Header (Pequeno)
   
   let imgClasses = '';
   let titleSizeClass = '';
-  let spacingClass = '';
+  let containerClasses = 'flex items-center justify-center w-full';
+  let textContainerClasses = 'flex flex-col items-start';
 
   switch (size) {
     case 'lg':
-      imgClasses = 'w-auto h-auto max-w-full max-h-[45vh] object-contain';
-      titleSizeClass = 'text-4xl';
-      spacingClass = 'mb-2'; // Distância reduzida entre logo e texto (era mb-6)
+      imgClasses = 'w-32 h-32 md:w-40 md:h-40 object-contain drop-shadow-2xl';
+      titleSizeClass = 'text-4xl md:text-5xl';
+      containerClasses = 'flex flex-col items-center justify-center w-full gap-4';
+      textContainerClasses = 'flex flex-col items-center';
       break;
     case 'md':
-      imgClasses = 'w-auto h-auto max-w-full max-h-[25vh] object-contain'; // 50% menor que lg
-      titleSizeClass = 'text-2xl';
-      spacingClass = 'mb-0.5';
+      imgClasses = 'w-20 h-20 md:w-24 md:h-24 object-contain';
+      titleSizeClass = 'text-3xl';
+      containerClasses = 'flex flex-col items-center justify-center w-full gap-2';
+      textContainerClasses = 'flex flex-col items-center';
       break;
     case 'sm':
     default:
-      imgClasses = 'w-10 h-10 object-contain';
-      titleSizeClass = 'text-lg';
-      spacingClass = 'mb-0';
+      imgClasses = 'w-8 h-8 object-contain';
+      titleSizeClass = 'text-xl';
+      containerClasses = 'flex items-center justify-center gap-2';
+      textContainerClasses = 'flex flex-col items-start';
       break;
   }
 
   return (
-    <div className="flex flex-col items-center justify-center w-full">
+    <div className={containerClasses}>
       <img 
         src="https://i.postimg.cc/G2DYHjrv/P-(1).png" 
         alt="PANDORA AI Logo" 
-        className={`${imgClasses} block ${spacingClass}`}
+        className={`${imgClasses} block animate-float`}
       />
-      <div className="flex flex-col items-center">
-        <h1 className={`${titleSizeClass} font-black tracking-tighter flex items-center`}>
-          <span className="text-black">PANDORA</span>
+      <div className={textContainerClasses}>
+        <h1 className={`${titleSizeClass} font-black tracking-tighter flex items-center whitespace-nowrap`}>
+          <span className="text-[#2E0249]">PANDORA</span>
           <span className="ml-2 bg-gradient-to-r from-[#8B2CF5] to-[#F52C99] bg-clip-text text-transparent">AI</span>
         </h1>
         {size !== 'sm' && !hideSlogan && (
-          <p className="text-gray-400 text-[9px] md:text-[11px] tracking-[0.25em] mt-1 uppercase font-bold text-center">
+          <p className="text-gray-400 text-[10px] md:text-[12px] tracking-[0.3em] mt-1 uppercase font-bold text-center">
             TRANSFORME SEU ESTILO COM A I.A
           </p>
         )}
@@ -102,7 +106,7 @@ export const Input: React.FC<InputProps> = ({ icon, label, className = '', ...pr
         </div>
         <input
           className={`
-            w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 text-gray-900 rounded-2xl
+            w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 text-[#2E0249] rounded-2xl
             focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500
             transition-all duration-200 placeholder:text-gray-400
             ${className}

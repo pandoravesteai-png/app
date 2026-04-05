@@ -2,9 +2,9 @@ import { GoogleGenAI } from "@google/genai";
 
 // Initialize Gemini AI
 const getAiClient = () => {
-    const apiKey = process.env.API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-        console.warn("API Key not found.");
+        console.warn("GEMINI_API_KEY not found.");
         return null;
     }
     return new GoogleGenAI({ apiKey });
@@ -19,7 +19,7 @@ export const generateFashionTip = async (prompt: string): Promise<string> => {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3-flash-preview',
       contents: `Você é um assistente de moda especialista da Pandora AI. Responda de forma curta, estilosa e encorajadora em português. Pergunta: ${prompt}`,
     });
     
@@ -30,22 +30,77 @@ export const generateFashionTip = async (prompt: string): Promise<string> => {
   }
 };
 
+export const extractStyleTags = async (imageBase64: string): Promise<string[]> => {
+  const ai = getAiClient();
+  if (!ai) return [];
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: imageBase64.split(',')[1] || imageBase64
+          }
+        },
+        {
+          text: "Analise esta peça de roupa e retorne apenas 3 a 5 palavras-chave de estilo, cor ou material separadas por vírgula. Exemplo: Linho, Minimalista, Tons Pastéis, Verão. Retorne apenas as palavras."
+        }
+      ]
+    });
+
+    const text = response.text || "";
+    return text.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
+  } catch (error) {
+    console.error("Error extracting style tags:", error);
+    return [];
+  }
+};
+
+export const generateCompliment = async (clothingImageBase64: string): Promise<string> => {
+  const ai = getAiClient();
+  if (!ai) return "Você tem um ótimo gosto para moda!";
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: clothingImageBase64.split(',')[1] || clothingImageBase64
+          }
+        },
+        {
+          text: "Analise esta peça de roupa. Identifique se é masculina, feminina ou unissex e qual é a peça. Em seguida, gere um elogio curto, criativo e entusiasmado em português (máximo 15 palavras) sobre o estilo da peça. FOCO APENAS NA ROUPA. Não mencione o corpo ou o rosto do usuário. Não use sempre as mesmas palavras, seja variado e estiloso. Retorne apenas o elogio."
+        }
+      ]
+    });
+
+    return response.text || "Essa peça é incrível e combina perfeitamente com seu estilo!";
+  } catch (error) {
+    console.error("Error generating compliment:", error);
+    return "Você tem um ótimo gosto para moda!";
+  }
+};
+
+import { functions, httpsCallable } from './firebase';
+
 const STRICT_SYSTEM_PROMPT = `
 You are a professional virtual try-on AI.
 Apply the clothing item to the person in the image.
 
 CRITICAL RULES - MUST FOLLOW:
-1. PRESERVE the person's exact body shape and size
-2. PRESERVE body type: if person is thin, keep thin. 
-   If person is heavy, keep heavy. NO changes to body.
-3. PRESERVE the person's face, skin tone, hair exactly
-4. PRESERVE the person's height and proportions
+1. ABSOLUTELY NO MODIFICATIONS TO THE FACE, HEAD, HAIR, OR FACIAL FEATURES.
+2. PRESERVE the person's exact identity, skin tone, and appearance 100%.
+3. PRESERVE the person's exact body shape, size, and type.
+4. PRESERVE the person's height and proportions.
 5. ALWAYS generate a FULL BODY photo, from head to toe. Ensure the feet and shoes are fully visible and NOT cut off.
-6. The clothing must ADAPT to the person's body,
-   NOT the body adapting to the clothing
-7. Make the clothing fit naturally on their real body
-8. Keep background exactly the same
-9. Result must look like a real photo, photorealistic
+6. The clothing must ADAPT to the person's body, NOT the body adapting to the clothing.
+7. Make the clothing fit naturally on their real body.
+8. Keep the background exactly the same.
+9. Result must look like a real photo, photorealistic.
 `;
 
 export const generateTryOnLook = async (
@@ -54,15 +109,13 @@ export const generateTryOnLook = async (
   category: string
 ): Promise<string | null> => {
   try {
-    const { getFunctions, httpsCallable } = await import('firebase/functions');
-    const { app } = await import('./firebase');
-    
-    const functions = getFunctions(app, 'us-central1');
-    const gerarTryOn = httpsCallable(functions, 'gerarTryOn', { timeout: 120000 }); // 120s
+    const gerarTryOn = httpsCallable(functions, 'gerarTryOn', { timeout: 180000 }); // Aumentado para 180s (3 min)
     
     const result = await gerarTryOn({
       urlFotoCliente: userImageBase64,
       urlFotoRoupa: clothingImageBase64,
+      category: category,
+      prompt: STRICT_SYSTEM_PROMPT
     });
     
     const data = result.data as any;
@@ -71,12 +124,13 @@ export const generateTryOnLook = async (
       return data.imagemGerada;
     }
     
-    console.error('Erro Try-On:', data.erro);
-    return null;
+    console.error('Erro Try-On (Data):', data);
+    throw new Error(data.erro || 'Não foi possível aplicar a roupa. Verifique se a pessoa e a peça estão bem visíveis.');
     
-  } catch (error) {
-    console.error('Erro no Try-On:', error);
-    return null;
+  } catch (error: any) {
+    console.error('Erro no Try-On (Catch):', error);
+    // Repassa o erro original para que o App.tsx possa tratar (ex: quota, timeout)
+    throw error;
   }
 };
 
@@ -85,7 +139,8 @@ export const generate360View = async (
   sideImageB64: string,
   backImageB64: string,
   clothingImageB64: string,
-  category: string
+  category: string,
+  clothingBackImageB64: string | null = null
 ): Promise<string[]> => {
   try {
     const { getFunctions, httpsCallable } = await import('firebase/functions');
@@ -98,7 +153,9 @@ export const generate360View = async (
       frontImageB64,
       sideImageB64,
       backImageB64,
-      clothingImageB64
+      clothingImageB64,
+      category,
+      clothingBackImageB64
     });
     
     const data = result.data as any;

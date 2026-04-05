@@ -15,7 +15,10 @@ export enum Screen {
   FAQ = 'FAQ',
   CADASTRO = 'CADASTRO',
   RECUPERAR_SENHA = 'RECUPERAR_SENHA',
-  REDEFINIR_SENHA = 'REDEFINIR_SENHA'
+  REDEFINIR_SENHA = 'REDEFINIR_SENHA',
+  STYLE_QUIZ = 'STYLE_QUIZ',
+  CHECKOUT = 'CHECKOUT',
+  MAIN = 'MAIN'
 }
 
 export interface HistoryItem {
@@ -26,6 +29,8 @@ export interface HistoryItem {
   clothingImage?: string | null; // The clothing image used (if upload)
   prompt?: string | null; // The prompt used (if text)
   type: 'UPLOAD' | 'TEXT';
+  stylistTip?: string;
+  compliment?: string;
 }
 
 export interface UserState {
@@ -39,14 +44,31 @@ export interface UserState {
   backImage: string | null;
   selectedCategory: string | null;
   clothingImage: string | null;
+  clothingBackImage: string | null;
   generatedImage: string | null;
   generated360Images: string[] | null; // [Frente, Lado, Costas]
   credits: number;
   history: HistoryItem[];
+  streak: number;
+  lastLogin?: string;
+  styleProfile?: string | null;
+  styleTags?: string[];
   lastPlan: string | null;
   lastPurchaseAmount?: number | null;
   lastPurchaseCredits?: number | null;
   lastPurchaseDate?: any | null;
+  lastCompliment?: string | null;
+  subscriptionTier?: 'basic' | 'premium';
+  subscriptionExpiresAt?: string | null;
+  subscriptionStartDate?: string | null;
+  creditsReleased?: number;
+  totalPhotosGenerated?: number;
+  dailyUsage?: { date: string, count: number } | null;
+  lastRouletteSpin?: string | null;
+  rechargeCount?: number;
+  badge?: 'bronze' | 'silver' | 'gold' | 'diamond' | null;
+  pendingCredits?: number;
+  loyaltyBonusClaimed?: boolean;
 }
 
 export interface CategoryItem {

@@ -1,10 +1,13 @@
 import * as React from 'react';
-import { useState, useEffect, useRef, Component } from 'react';
+import { useState, useEffect, useRef, Component, useMemo } from 'react';
+import { processCreditRelease } from './services/creditsService';
 import { Screen, UserState, ClothingType, HistoryItem } from './types';
 import { AppLogo, Button, Input } from './components/UI';
 import { CATEGORIES, HOME_CAROUSEL_1, HOME_CAROUSEL_2 } from './constants';
-import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle } from 'lucide-react';
-import { doc, updateDoc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle, HelpCircle, Star, User, ShoppingBag, ChevronRight, Terminal, Trophy, Gift, RotateCw } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from "@google/genai";
+import { doc, updateDoc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, deleteDoc, increment } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { db, auth, handleFirestoreError, OperationType, storage, functions, httpsCallable } from './services/firebase';
 import { 
@@ -17,10 +20,177 @@ import {
   confirmPasswordReset,
   GoogleAuthProvider
 } from 'firebase/auth';
-import { generateFashionTip, generateTryOnLook, generate360View } from './services/geminiService';
+import { generateFashionTip, generateTryOnLook, generate360View, extractStyleTags, generateCompliment } from './services/geminiService';
 import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider, requestNotificationPermission } from './services/firebase';
-import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail } from './services/creditsService';
+import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail, purchasePremium, spinRoulette, claimChest } from './services/creditsService';
 import { createPixPayment } from './services/paymentService';
+
+
+// --- Stylist Tips Generator ---
+const getStylistTip = (category: string): string => {
+  const tips: Record<string, string[]> = {
+    'Blusa': [
+      "Combine esta blusa com acessórios dourados para um look mais sofisticado.",
+      "Tente usar esta peça com uma calça de cintura alta para alongar a silhueta.",
+      "Esta cor combina perfeitamente com tons neutros como bege ou branco."
+    ],
+    'Short': [
+      "Este short fica incrível com uma sandália rasteira para um look casual de verão.",
+      "Adicione um cinto fino para dar um toque de elegância extra ao visual.",
+      "Combine com uma t-shirt básica para um estilo 'effortless chic'."
+    ],
+    'Calça': [
+      "Esta calça pede um salto alto para um visual mais poderoso e profissional.",
+      "Dobre a barra da calça para um look mais moderno e despojado.",
+      "Use com uma blusa por dentro para destacar a cintura."
+    ],
+    'Saia': [
+      "Esta saia fica ótima com uma bota de cano curto para os dias mais frescos.",
+      "Combine com uma blusa mais justa para equilibrar o volume da saia.",
+      "Acessórios prateados vão dar um brilho especial a este conjunto."
+    ],
+    'Vestido': [
+      "Este vestido é versátil: use com tênis para o dia ou salto para a noite.",
+      "Um colar longo vai ajudar a alongar o visual com este decote.",
+      "Adicione uma jaqueta jeans para um look mais jovem e descontraído."
+    ],
+    'default': [
+      "Você ficou incrível! Esta combinação realça muito o seu estilo pessoal.",
+      "Uma escolha audaciosa e elegante. Você está pronta para qualquer evento!",
+      "Este look transmite confiança e modernidade. Arrasou!"
+    ]
+  };
+
+  const categoryTips = tips[category] || tips['default'];
+  return categoryTips[Math.floor(Math.random() * categoryTips.length)];
+};
+
+// --- Celebrity Style Tips ---
+const getCelebrityTip = (style: string): { celebrity: string, tip: string } => {
+  const tips: Record<string, { celebrity: string, tip: string }[]> = {
+    'Minimalista': [
+      { celebrity: "Victoria Beckham", tip: "O menos é sempre mais. Foque em cortes impecáveis e cores neutras para um ar de sofisticação instantânea." },
+      { celebrity: "Angelina Jolie", tip: "Invista em peças atemporais. Um bom trench coat ou um vestido preto simples são a base de qualquer guarda-roupa elegante." }
+    ],
+    'Boho': [
+      { celebrity: "Vanessa Hudgens", tip: "Não tenha medo de misturar texturas e estampas. O segredo do boho é parecer despojado, mas com intenção." },
+      { celebrity: "Sienna Miller", tip: "Acessórios são tudo. Chapéus, franjas e camadas de colares transformam qualquer look básico em boho chic." }
+    ],
+    'Executivo': [
+      { celebrity: "Amal Clooney", tip: "O poder está no caimento. Um blazer bem estruturado comunica autoridade e elegância em qualquer ambiente." },
+      { celebrity: "Meghan Markle", tip: "Monocromático é o segredo da sofisticação. Tons sobre tons criam uma silhueta alongada e profissional." }
+    ],
+    'Streetwear': [
+      { celebrity: "Rihanna", tip: "Conforto e atitude devem andar juntos. Misture peças oversized com acessórios de luxo para o contraste perfeito." },
+      { celebrity: "Hailey Bieber", tip: "O tênis certo muda tudo. Use peças esportivas com jaquetas de couro ou blazers para um look urbano moderno." }
+    ],
+    'Romântico': [
+      { celebrity: "Taylor Swift", tip: "Cores pastéis e estampas florais nunca saem de moda. Detalhes como rendas e babados trazem feminilidade ao look." },
+      { celebrity: "Elle Fanning", tip: "Tecidos leves e fluidos criam um ar etéreo. Aposte em silhuetas que valorizem a delicadeza." }
+    ],
+    'default': [
+      { celebrity: "Gisele Bündchen", tip: "O melhor acessório é a sua confiança. Vista o que te faz sentir bem e o resto virá naturalmente." }
+    ]
+  };
+
+  const styleTips = tips[style] || tips['default'];
+  return styleTips[Math.floor(Math.random() * styleTips.length)];
+};
+
+// --- Style Quiz Screen ---
+const StyleQuizScreen: React.FC<{
+  onComplete: (style: string) => void;
+  onBack: () => void;
+}> = ({ onComplete, onBack }) => {
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<string[]>([]);
+
+  const questions = [
+    {
+      q: "Como você descreveria seu look ideal para o dia a dia?",
+      options: [
+        { label: "Simples, limpo e funcional", style: "Minimalista" },
+        { label: "Confortável, com estampas e texturas", style: "Boho" },
+        { label: "Alinhado, profissional e elegante", style: "Executivo" },
+        { label: "Urbano, moderno e com tênis", style: "Streetwear" },
+        { label: "Delicado, com cores suaves e detalhes", style: "Romântico" }
+      ]
+    },
+    {
+      q: "Qual paleta de cores mais te atrai?",
+      options: [
+        { label: "Preto, branco, cinza e bege", style: "Minimalista" },
+        { label: "Tons terrosos, vinho e mostarda", style: "Boho" },
+        { label: "Azul marinho, off-white e preto", style: "Executivo" },
+        { label: "Cores vibrantes, neon ou grafites", style: "Streetwear" },
+        { label: "Rosa, lavanda, menta e tons pastéis", style: "Romântico" }
+      ]
+    },
+    {
+      q: "Qual acessório você não vive sem?",
+      options: [
+        { label: "Um relógio clássico ou nada", style: "Minimalista" },
+        { label: "Muitos anéis e colares de pedras", style: "Boho" },
+        { label: "Uma bolsa de couro estruturada", style: "Executivo" },
+        { label: "Boné, bucket hat ou óculos escuros", style: "Streetwear" },
+        { label: "Tiara, laço ou joias delicadas", style: "Romântico" }
+      ]
+    }
+  ];
+
+  const handleAnswer = (style: string) => {
+    const newAnswers = [...answers, style];
+    if (step < questions.length - 1) {
+      setAnswers(newAnswers);
+      setStep(step + 1);
+    } else {
+      // Calcula o estilo predominante
+      const counts: Record<string, number> = {};
+      newAnswers.forEach(s => counts[s] = (counts[s] || 0) + 1);
+      const finalStyle = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+      onComplete(finalStyle);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-white flex flex-col p-6 animate-fade-in">
+      <div className="flex items-center gap-4 mb-8">
+        <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+          <ArrowLeft size={24} />
+        </button>
+        <h2 className="text-xl font-bold">Descubra seu Estilo</h2>
+      </div>
+
+      <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full">
+        <div className="mb-8">
+          <div className="flex gap-2 mb-4">
+            {questions.map((_, i) => (
+              <div 
+                key={i} 
+                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i <= step ? 'bg-purple-600' : 'bg-gray-100'}`} 
+              />
+            ))}
+          </div>
+          <p className="text-xs font-bold text-purple-600 uppercase tracking-widest mb-2">Pergunta {step + 1} de {questions.length}</p>
+          <h3 className="text-2xl font-bold text-[#2E0249] leading-tight">{questions[step].q}</h3>
+        </div>
+
+        <div className="space-y-3">
+          {questions[step].options.map((opt, i) => (
+            <button
+              key={i}
+              onClick={() => handleAnswer(opt.style)}
+              className="w-full p-5 text-left rounded-2xl border-2 border-gray-100 hover:border-purple-500 hover:bg-purple-50 transition-all group flex items-center justify-between"
+            >
+              <span className="font-medium text-[#2E0249] group-hover:text-purple-900">{opt.label}</span>
+              <ChevronRight size={18} className="text-gray-300 group-hover:text-purple-500" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // --- Sharing Functions ---
 const compartilharWhatsApp = (imageUrl?: string) => {
@@ -45,21 +215,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   window.deferredPrompt = e;
 });
-
-// Placeholders for missing functions used in user request
-const getMessagingToken = async () => {
-  console.log('getMessagingToken placeholder called');
-  return null; // Return null for now
-};
-
-const saveUserToken = async (userId: string, token: string) => {
-  console.log('saveUserToken placeholder called', userId, token);
-  try {
-    await updateDoc(doc(db, 'users', userId), { fcmToken: token });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
-  }
-};
 
 // --- Error Boundary Component ---
 interface ErrorBoundaryProps {
@@ -102,7 +257,7 @@ class ErrorBoundary extends React.Component<any, any> {
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-600 mb-4">
             <AlertTriangle size={32} />
           </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Ops! Algo deu errado.</h2>
+          <h2 className="text-xl font-bold text-[#2E0249] mb-2">Ops! Algo deu errado.</h2>
           <p className="text-gray-600 mb-6">{message}</p>
           <Button onClick={() => window.location.reload()}>Recarregar Aplicativo</Button>
         </div>
@@ -119,7 +274,7 @@ const NoRegistrationScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     <div className="w-full h-screen bg-white flex flex-col items-center justify-center p-6 animate-fade-in text-center relative">
       <button 
         onClick={onBack}
-        className="absolute top-6 left-6 p-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
+        className="absolute top-6 left-6 p-2 rounded-full hover:bg-gray-100 text-[#2E0249] transition-colors"
       >
         <ArrowLeft size={24} />
       </button>
@@ -127,8 +282,8 @@ const NoRegistrationScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mb-6 text-purple-600">
         <UserX size={40} />
       </div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Conta não encontrada</h2>
-      <p className="text-gray-600 mb-8 max-w-xs">
+      <h2 className="text-2xl font-bold text-[#2E0249] mb-2">Conta não encontrada</h2>
+      <p className="text-[#2E0249]/80 mb-8 max-w-xs">
         Não encontramos um cadastro para este usuário. Crie sua conta agora para acessar o Pandora AI.
       </p>
       
@@ -163,7 +318,7 @@ const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
            <CameraIcon size={16} />
         </div>
         <h3 className="text-lg font-bold text-[#6A00F4] mb-2 leading-tight">Sua Imagem Profissional Começa Agora!</h3>
-        <p className="text-[10px] text-gray-600 mb-3 px-2 leading-tight">
+        <p className="text-[10px] text-[#2E0249]/70 mb-3 px-2 leading-tight">
            Cansado de selfies que não transmitem seu potencial? Um retrato profissional abre portas.
         </p>
         <div className="flex items-center justify-center gap-2 mb-2">
@@ -252,7 +407,10 @@ const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
            </div>
         </div>
 
-        <button onClick={nextSlide} className="bg-[#6A00F4] text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:bg-purple-700 transition-colors w-3/4">
+        <button 
+          onClick={() => window.open('https://wa.me/5583991420009?text=Ol%C3%A1%2C%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es!%20', '_blank')} 
+          className="bg-[#6A00F4] text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:bg-purple-700 transition-colors w-3/4"
+        >
            Quero Meu Book Agora!
         </button>
       </div>
@@ -298,22 +456,53 @@ const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
 
 // --- Helper Functions ---
 async function urlToBase64(url: string): Promise<string> {
+  if (!url) return "";
+  if (url.startsWith('data:image')) return url.split(',')[1];
+  
   try {
+    // Tenta fetch primeiro (funciona para blob: e same-origin)
     const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const blob = await response.blob();
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
           const base64String = reader.result as string;
-          // Remove data:image/jpeg;base64, prefix or similar
           resolve(base64String.split(',')[1]); 
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    console.error("Error converting to base64", e);
-    return "";
+    console.warn("Fetch falhou, tentando objeto Image para CORS", e);
+    // Fallback para objeto Image para URLs externas com CORS (como Unsplash)
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve("");
+            return;
+          }
+          ctx.drawImage(img, 0, 0);
+          const dataURL = canvas.toDataURL('image/jpeg');
+          resolve(dataURL.split(',')[1]);
+        } catch (err) {
+          console.error("Erro ao desenhar no canvas para base64", err);
+          resolve("");
+        }
+      };
+      img.onerror = (err) => {
+        console.error("Erro ao converter para base64 via Image", err);
+        resolve("");
+      };
+      img.src = url;
+    });
   }
 }
 
@@ -485,45 +674,96 @@ const SplashScreen: React.FC<{ onFinish: () => void }> = ({ onFinish }) => {
 };
 
 const LoadingScreen: React.FC<{ 
-  message?: string;
-  userImage?: string | null;
+  message?: string; 
+  userImage?: string | null; 
   clothingImage?: string | null;
-}> = ({ message, userImage, clothingImage }) => {
+  is360?: boolean;
+}> = ({ message, userImage, clothingImage, is360 }) => {
   const [progress, setProgress] = useState(0);
   const [messageIndex, setMessageIndex] = useState(0);
-  const [scale, setScale] = useState(1.2);
+  const [tipIndex, setTipIndex] = useState(0);
+  const [animationPhase, setAnimationPhase] = useState(0); // 0: User 3D, 1: Clothing 3D, 2: Positioning, 3: Collision, 4: Finished
+  const [showFlash, setShowFlash] = useState(false);
   
-  const messages = [
-    "✨ Analisando seu corpo...",
-    "🎨 Moldando a peça em você...",
-    "💫 Ajustando o caimento...",
-    "🚀 Finalizando seu novo look..."
+  const messages = is360 ? [
+    "🔄 Mapeando ângulos laterais...",
+    "📸 Reconstruindo verso da peça...",
+    "📐 Ajustando caimento 360°...",
+    "✨ Renderizando visualização...",
+    "🚀 Finalizando sua experiência 360°..."
+  ] : [
+    "✨ Analisando silhueta...",
+    "🎨 Mapeando tecidos...",
+    "💫 Ajustando iluminação...",
+    "💎 Preservando traços faciais...",
+    "🚀 Finalizando seu look..."
+  ];
+
+  const fashionTips = is360 ? [
+    "💡 Dica: Arraste para girar seu look após a geração!",
+    "👗 Sabia? O 360° mostra detalhes que a frente não revela.",
+    "🌟 Pandora AI garante perfeição em todos os ângulos.",
+    "📸 Dica: Use o zoom para ver as texturas de perto.",
+    "✨ O modo 360° é ideal para ver o caimento das costas."
+  ] : [
+    "💡 Dica: Você pode ver este look em 360° após a geração!",
+    "👗 Sabia? O caimento da peça é ajustado ao seu corpo real.",
+    "🌟 Pandora AI preserva 100% da sua identidade e rosto.",
+    "📸 Dica: Experimente diferentes poses para resultados variados.",
+    "✨ Compartilhe seu look no Instagram e marque a @PandoraAI!"
   ];
 
   useEffect(() => {
-    // Progresso da barra
+    // Progress logic
     const progressInterval = setInterval(() => {
       setProgress(prev => {
-        if (prev >= 100) return 100;
-        const next = prev + Math.random() * 10;
-        return Math.min(next, 100);
+        if (prev < 95) { // Slow down near the end until collision
+          const increment = Math.random() * 1.5 + 0.8;
+          return Math.min(95, prev + increment);
+        }
+        return prev;
       });
-    }, 400);
+    }, 500);
 
-    // Troca de mensagens
     const messageInterval = setInterval(() => {
       setMessageIndex(prev => (prev + 1) % messages.length);
-    }, 2000);
+    }, 3000);
 
-    // Efeito de "zoom" na roupa
-    const scaleInterval = setInterval(() => {
-      setScale(prev => prev === 1.2 ? 1 : 1.2);
-    }, 1500);
+    const tipInterval = setInterval(() => {
+      setTipIndex(prev => (prev + 1) % fashionTips.length);
+    }, 5000);
+
+    // Animation Sequence Logic
+    const sequence = async () => {
+      // Phase 0: User Image 3D Loop (4s) - Faster
+      setAnimationPhase(0);
+      await new Promise(r => setTimeout(r, 4000));
+      
+      // Phase 1: Clothing Image 3D Loop (4s) - Faster
+      setAnimationPhase(1);
+      await new Promise(r => setTimeout(r, 4000));
+      
+      // Phase 2: Positioning (1.5s)
+      setAnimationPhase(2);
+      await new Promise(r => setTimeout(r, 1500));
+      
+      // Phase 3: Collision (1s)
+      setAnimationPhase(3);
+      await new Promise(r => setTimeout(r, 1000));
+      
+      // Phase 4: Impact / Flash / 100%
+      setShowFlash(true);
+      setProgress(100); // Force 100% at impact
+      setAnimationPhase(4);
+      setTimeout(() => setShowFlash(false), 600);
+    };
+
+    sequence();
 
     return () => {
       clearInterval(progressInterval);
       clearInterval(messageInterval);
-      clearInterval(scaleInterval);
+      clearInterval(tipInterval);
     };
   }, []);
 
@@ -540,232 +780,487 @@ const LoadingScreen: React.FC<{
       overflow: 'hidden',
       zIndex: 50
     }}>
-      
-      {/* Container principal com as duas imagens */}
-      <div style={{
-        position: 'relative',
-        width: '320px',
-        height: '420px',
-        marginBottom: '40px',
-        borderRadius: '24px',
-        overflow: 'hidden',
-        boxShadow: '0 25px 50px rgba(0,0,0,0.3)'
-      }}>
-        
-        {/* Foto da pessoa ao fundo (desfocada) */}
-        {userImage && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            zIndex: 1
-          }}>
-            <img 
-              src={userImage}
-              alt="Você"
+      {/* Decorative Elements */}
+      <motion.div 
+        animate={{ 
+          scale: [1, 1.2, 1],
+          opacity: [0.15, 0.3, 0.15]
+        }}
+        transition={{ duration: 8, repeat: Infinity }}
+        style={{
+          position: 'absolute',
+          top: '-10%',
+          left: '-10%',
+          width: '60%',
+          height: '60%',
+          background: 'radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%)',
+          borderRadius: '50%',
+          filter: 'blur(80px)'
+        }} 
+      />
+
+      {/* Impact Flash - Enhanced for more power */}
+      <AnimatePresence>
+        {showFlash && (
+          <>
+            {/* Main Screen Flash */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0, 1, 0] }}
+              transition={{ duration: 0.7, times: [0, 0.1, 1] }}
               style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                filter: 'blur(4px) brightness(0.85)',
-                opacity: 0.8
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: 'white',
+                zIndex: 100,
+                mixBlendMode: 'overlay'
               }}
             />
-            {/* Overlay gradiente */}
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              background: 'linear-gradient(to bottom, rgba(102,126,234,0.15), rgba(118,75,162,0.15))'
-            }} />
-          </div>
-        )}
-
-        {/* Peça de roupa se moldando (animada) */}
-        {clothingImage && (
-          <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: `translate(-50%, -50%) scale(${scale})`,
-            transition: 'transform 1.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
-            zIndex: 2,
-            width: '70%',
-            maxWidth: '220px'
-          }}>
-            <img 
-              src={clothingImage}
-              alt="Roupa"
+            {/* Radial Shockwave from Center */}
+            <motion.div
+              initial={{ scale: 0, opacity: 1 }}
+              animate={{ scale: 5, opacity: 0 }}
+              transition={{ duration: 0.9, ease: "easeOut" }}
               style={{
-                width: '100%',
-                height: 'auto',
-                display: 'block',
-                filter: 'drop-shadow(0 15px 30px rgba(0,0,0,0.5))',
-                borderRadius: '12px'
+                position: 'absolute',
+                width: '400px',
+                height: '400px',
+                background: 'radial-gradient(circle, #ffffff 0%, #f472b6 30%, #9333ea 60%, transparent 80%)',
+                borderRadius: '50%',
+                zIndex: 90,
+                top: '50%',
+                left: '50%',
+                x: '-50%',
+                y: '-50%',
+                boxShadow: '0 0 100px #fff'
               }}
             />
-            
-            {/* Efeito de brilho passando (moldagem acontecendo) */}
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: '-100%',
-              width: '100%',
-              height: '100%',
-              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-              animation: 'scan 2s ease-in-out infinite',
-              pointerEvents: 'none'
-            }} />
-          </div>
+          </>
         )}
+      </AnimatePresence>
 
-        {/* Ondas de energia (efeito de processamento) */}
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '300px',
-          height: '300px',
-          borderRadius: '50%',
-          border: '2px solid rgba(255,255,255,0.3)',
-          zIndex: 3,
-          animation: 'ripple 2s ease-out infinite'
-        }} />
-        
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '300px',
-          height: '300px',
-          borderRadius: '50%',
-          border: '2px solid rgba(255,255,255,0.2)',
-          zIndex: 3,
-          animation: 'ripple 2s ease-out 0.5s infinite'
-        }} />
-      </div>
-
-      {/* Mensagem principal */}
-      <h2 style={{
-        color: 'white',
-        fontSize: '22px',
-        fontWeight: 'bold',
-        marginBottom: '8px',
-        textAlign: 'center',
-        animation: 'fade-slide 0.5s ease-in-out',
-        textShadow: '0 2px 10px rgba(0,0,0,0.3)'
-      }}>
-        {message || messages[messageIndex]}
-      </h2>
-
-      <p style={{
-        color: 'rgba(255,255,255,0.85)',
-        fontSize: '14px',
-        marginBottom: '25px',
-        textAlign: 'center',
-        fontWeight: '500'
-      }}>
-        A IA está moldando a peça ao seu corpo
-      </p>
-
-      {/* Barra de progresso */}
       <div style={{
         width: '100%',
-        maxWidth: '320px'
+        maxWidth: '500px',
+        textAlign: 'center',
+        color: 'white',
+        zIndex: 10,
+        perspective: '1200px'
       }}>
-        <div style={{
-          width: '100%',
-          height: '6px',
-          background: 'rgba(255,255,255,0.2)',
-          borderRadius: '10px',
-          overflow: 'hidden',
-          marginBottom: '10px',
-          position: 'relative'
-        }}>
-          <div style={{
-            width: `${progress}%`,
-            height: '100%',
-            background: 'linear-gradient(90deg, #fff 0%, rgba(255,255,255,0.7) 100%)',
-            borderRadius: '10px',
-            transition: 'width 0.3s ease-out',
-            boxShadow: '0 0 15px rgba(255,255,255,0.6)'
-          }} />
-        </div>
         
+        {/* Main Animation Stage */}
         <div style={{
+          position: 'relative',
+          width: '300px',
+          height: '400px',
+          margin: '0 auto 40px',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          justifyContent: 'center',
+          perspective: '1200px'
         }}>
-          <p style={{
-            color: 'white',
-            fontSize: '14px',
-            fontWeight: 'bold'
-          }}>
-            {Math.round(progress)}% completo
-          </p>
           
-          <div style={{
-            display: 'flex',
-            gap: '4px'
-          }}>
-            {[0, 1, 2].map(i => (
-              <div
-                key={i}
+          {/* 360 Badge in Core (Above Portal) */}
+          {is360 && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              style={{
+                position: 'absolute',
+                padding: '4px 12px',
+                background: 'rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(10px)',
+                borderRadius: '999px',
+                border: '1px solid rgba(255,255,255,0.4)',
+                color: 'white',
+                fontSize: '14px',
+                fontWeight: '900',
+                letterSpacing: '2px',
+                zIndex: 30,
+                boxShadow: '0 0 20px rgba(255,255,255,0.3)'
+              }}
+            >
+              360°
+            </motion.div>
+          )}
+
+          {/* Neural Core / Portal */}
+          <motion.div
+            animate={{
+              scale: animationPhase === 3 ? [1, 2.8, 2.2] : [1, 1.1, 1],
+              rotate: 360,
+              opacity: animationPhase >= 3 ? 0.9 : 0.4
+            }}
+            transition={{
+              rotate: { duration: 10, repeat: Infinity, ease: "linear" },
+              scale: { duration: 2, repeat: Infinity }
+            }}
+            style={{
+              position: 'absolute',
+              width: '160px',
+              height: '160px',
+              background: 'radial-gradient(circle, rgba(255,255,255,0.4) 0%, rgba(147,51,234,0.6) 50%, transparent 70%)',
+              borderRadius: '50%',
+              filter: 'blur(15px)',
+              zIndex: 5,
+              border: '2px solid rgba(255,255,255,0.2)'
+            }}
+          >
+            {/* Spinning Rings inside core */}
+            <div style={{
+              position: 'absolute',
+              inset: '10%',
+              border: '2px dashed rgba(255,255,255,0.2)',
+              borderRadius: '50%',
+              animation: 'spin 4s linear infinite'
+            }} />
+          </motion.div>
+
+          {/* 360 Mode Distinctive Element */}
+          {is360 && (
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+              style={{
+                position: 'absolute',
+                width: '450px',
+                height: '450px',
+                borderRadius: '50%',
+                border: '2px dashed rgba(255,255,255,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 5
+              }}
+            >
+              {[0, 90, 180, 270].map((angle) => (
+                <div
+                  key={angle}
+                  style={{
+                    position: 'absolute',
+                    transform: `rotate(${angle}deg) translateY(-225px)`,
+                    color: 'white',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    textShadow: '0 0 10px rgba(0,0,0,0.5)',
+                    opacity: 0.6
+                  }}
+                >
+                  360°
+                </div>
+              ))}
+              
+              {/* Secondary Glowing Ring */}
+              <motion.div
+                animate={{ rotate: -360 }}
+                transition={{ duration: 12, repeat: Infinity, ease: "linear" }}
                 style={{
-                  width: '6px',
-                  height: '6px',
-                  background: 'white',
+                  position: 'absolute',
+                  width: '380px',
+                  height: '380px',
                   borderRadius: '50%',
-                  animation: `bounce 1s ease-in-out ${i * 0.15}s infinite`
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  boxShadow: 'inset 0 0 20px rgba(255,255,255,0.05)',
+                  zIndex: 4
                 }}
               />
-            ))}
-          </div>
+            </motion.div>
+          )}
+
+          {/* User Image Animation */}
+          <AnimatePresence>
+            {userImage && (
+              <motion.div
+                key="user-anim"
+                initial={{ x: 300, z: -400, opacity: 0, rotateY: 0 }}
+                animate={
+                  animationPhase === 0 ? {
+                    x: [250, 0, -250, 0, 250],
+                    y: [0, -40, 0, 40, 0],
+                    z: [0, 200, 0, -400, 0],
+                    rotateY: [0, 180, 360, 540, 720],
+                    opacity: 1,
+                    scale: [0.8, 1.2, 0.8, 0.6, 0.8],
+                    filter: [
+                      'brightness(1) blur(0px)',
+                      'brightness(1.6) blur(0px)',
+                      'brightness(1) blur(0px)',
+                      'brightness(0.3) blur(8px)',
+                      'brightness(1) blur(0px)'
+                    ]
+                  } : animationPhase === 1 ? {
+                    x: 0,
+                    y: 0,
+                    z: -200,
+                    rotateY: 0,
+                    opacity: 0.6,
+                    scale: 0.7,
+                    filter: 'brightness(0.5) blur(2px)'
+                  } : animationPhase === 2 ? {
+                    x: -85,
+                    y: 0,
+                    z: 0,
+                    rotateY: 0,
+                    opacity: 1,
+                    scale: 1,
+                    filter: 'brightness(1) blur(0px)'
+                  } : animationPhase === 3 ? {
+                    x: 0,
+                    scale: 1.15,
+                    filter: 'brightness(4) contrast(1.5) drop-shadow(0 0 40px #fff)'
+                  } : {
+                    x: 0,
+                    scale: 1,
+                    opacity: 1,
+                    filter: 'brightness(1.2) blur(0px)'
+                  }
+                }
+                transition={animationPhase === 0 ? {
+                  duration: 4,
+                  ease: "linear",
+                  repeat: Infinity,
+                  times: [0, 0.25, 0.5, 0.75, 1]
+                } : {
+                  duration: 1,
+                  type: "spring",
+                  stiffness: 70
+                }}
+                style={{
+                  position: 'absolute',
+                  width: '180px',
+                  height: '240px',
+                  borderRadius: '24px',
+                  overflow: 'hidden',
+                  border: '4px solid rgba(255,255,255,0.6)',
+                  boxShadow: '0 40px 80px rgba(0,0,0,0.6)',
+                  zIndex: 20,
+                  backfaceVisibility: 'hidden'
+                }}
+              >
+                <img src={userImage} alt="User" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {/* Scanning line effect during orbit */}
+                {animationPhase === 0 && (
+                  <motion.div 
+                    animate={{ top: ['-100%', '200%'] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      height: '20%',
+                      background: 'linear-gradient(to bottom, transparent, rgba(255,255,255,0.8), transparent)',
+                      zIndex: 21
+                    }}
+                  />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Clothing Image Animation */}
+          <AnimatePresence>
+            {clothingImage && (
+              <motion.div
+                key="clothing-anim"
+                initial={{ x: 300, z: -400, opacity: 0, rotateY: 0 }}
+                animate={
+                  animationPhase === 1 ? {
+                    x: [250, 0, 0, -250, 0, 250],
+                    y: [0, 40, 40, 0, -40, 0],
+                    z: [0, 200, 200, 0, -400, 0],
+                    rotateY: [0, 180, 180, 360, 540, 720],
+                    opacity: 1,
+                    scale: [0.8, 1.2, 1.2, 0.8, 0.6, 0.8],
+                    filter: [
+                      'brightness(1) blur(0px)',
+                      'brightness(1.8) blur(0px)',
+                      'brightness(1.8) blur(0px)',
+                      'brightness(1) blur(0px)',
+                      'brightness(0.4) blur(6px)',
+                      'brightness(1) blur(0px)'
+                    ]
+                  } : animationPhase === 0 ? {
+                    x: 0,
+                    y: 0,
+                    z: -200,
+                    rotateY: 0,
+                    opacity: 0.6,
+                    scale: 0.7,
+                    filter: 'brightness(0.5) blur(2px)'
+                  } : animationPhase === 2 ? {
+                    x: 85,
+                    y: 0,
+                    z: 0,
+                    rotateY: 0,
+                    opacity: 1,
+                    scale: 1,
+                    filter: 'brightness(1) blur(0px)'
+                  } : animationPhase === 3 ? {
+                    x: 0,
+                    scale: 1.15,
+                    filter: 'brightness(4) contrast(1.5) drop-shadow(0 0 40px #fff)'
+                  } : {
+                    x: 0,
+                    scale: 1,
+                    opacity: 1,
+                    filter: 'brightness(1.2) blur(0px)'
+                  }
+                }
+                transition={animationPhase === 1 ? {
+                  duration: 4,
+                  ease: "linear",
+                  repeat: Infinity,
+                  times: [0, 0.2, 0.4, 0.6, 0.8, 1]
+                } : {
+                  duration: 1,
+                  type: "spring",
+                  stiffness: 70
+                }}
+                style={{
+                  position: 'absolute',
+                  width: '180px',
+                  height: '240px',
+                  borderRadius: '24px',
+                  overflow: 'hidden',
+                  border: '4px solid rgba(255,255,255,0.6)',
+                  boxShadow: '0 40px 80px rgba(0,0,0,0.6)',
+                  zIndex: 25,
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  backdropFilter: 'blur(10px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '20px'
+                }}
+              >
+                <img src={clothingImage} alt="Clothing" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                {/* Digital scan effect */}
+                {animationPhase === 1 && (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    backgroundImage: 'radial-gradient(circle, rgba(147,51,234,0.2) 1px, transparent 1px)',
+                    backgroundSize: '10px 10px',
+                    opacity: 0.5
+                  }} />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <motion.h2 
+          key={messageIndex}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{ 
+            fontSize: '24px', 
+            fontWeight: 'bold', 
+            marginBottom: '10px',
+            textShadow: '0 2px 10px rgba(0,0,0,0.5)'
+          }}
+        >
+          {message || messages[messageIndex]}
+        </motion.h2>
+        
+        <div style={{
+          width: '100%',
+          height: '10px',
+          backgroundColor: 'rgba(255,255,255,0.1)',
+          borderRadius: '5px',
+          marginBottom: '30px',
+          overflow: 'hidden',
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          <motion.div 
+            animate={{ width: `${progress}%` }}
+            transition={{ type: "spring", stiffness: 50 }}
+            style={{
+              height: '100%',
+              background: 'linear-gradient(90deg, #9333ea, #ec4899)',
+              borderRadius: '5px',
+              boxShadow: '0 0 20px rgba(236,72,153,0.5)'
+            }} 
+          />
+        </div>
+
+        {/* Fashion Tip Card */}
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            backdropFilter: 'blur(10px)',
+            padding: '20px',
+            borderRadius: '24px',
+            border: '1px solid rgba(255,255,255,0.1)',
+            minHeight: '120px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+          }}
+        >
+          <Sparkles style={{ width: '24px', height: '24px', marginBottom: '12px', color: '#fbbf24' }} />
+          <AnimatePresence mode="wait">
+            <motion.p 
+              key={tipIndex}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              style={{ 
+                fontSize: '15px', 
+                lineHeight: '1.6',
+                fontStyle: 'italic',
+                color: 'rgba(255,255,255,0.9)'
+              }}
+            >
+              {fashionTips[tipIndex]}
+            </motion.p>
+          </AnimatePresence>
+        </motion.div>
+
+        <p style={{ 
+          marginTop: '40px', 
+          fontSize: '11px', 
+          opacity: 0.4,
+          letterSpacing: '4px',
+          textTransform: 'uppercase',
+          fontWeight: 'bold'
+        }}>
+          Pandora AI • Neural Fashion Engine
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// --- Checkout Screen ---
+const CheckoutScreen: React.FC<{ url: string; onBack: () => void }> = ({ url, onBack }) => {
+  return (
+    <div className="flex flex-col h-full bg-white animate-fade-in">
+      <div className="p-4 border-b flex items-center gap-4 bg-white sticky top-0 z-10 shadow-sm">
+        <button 
+          onClick={onBack} 
+          className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600"
+          aria-label="Voltar"
+        >
+          <ArrowLeft size={24} />
+        </button>
+        <div>
+          <h2 className="text-lg font-bold text-[#2E0249]">Pagamento Seguro</h2>
+          <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Finalize sua assinatura</p>
         </div>
       </div>
-
-      <style>
-        {`
-          @keyframes scan {
-            0% { left: -100%; }
-            100% { left: 200%; }
-          }
-
-          @keyframes ripple {
-            0% {
-              transform: translate(-50%, -50%) scale(0.8);
-              opacity: 1;
-            }
-            100% {
-              transform: translate(-50%, -50%) scale(1.3);
-              opacity: 0;
-            }
-          }
-
-          @keyframes fade-slide {
-            from {
-              opacity: 0;
-              transform: translateY(-10px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-
-          @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-8px); }
-          }
-        `}
-      </style>
+      <div className="flex-1 relative bg-gray-50">
+        <iframe 
+          src={url} 
+          className="w-full h-full border-0"
+          title="Checkout"
+          allow="payment"
+        />
+      </div>
     </div>
   );
 };
@@ -832,8 +1327,7 @@ const LoginScreen: React.FC<{
       setUserState(prev => ({ 
         ...prev, 
         email: userEmail,
-        name: name,
-        credits: 10
+        name: name
       }));
       setScreen(Screen.ONBOARDING);
 
@@ -847,13 +1341,6 @@ const LoginScreen: React.FC<{
             credits: 10,
             created_at: serverTimestamp()
           });
-        } else {
-          const userData = userSnap.data();
-          setUserState(prev => ({ 
-            ...prev, 
-            credits: userData.credits ?? 0,
-            name: userData.nome || userData.name || name,
-          }));
         }
       }).catch(console.error);
       
@@ -876,13 +1363,6 @@ const LoginScreen: React.FC<{
       // Login bem-sucedido
       setUserId(user.uid);
       await saveUserEmail(user.uid, emailLower);
-      const credits = await getOrCreateUserCredits(user.uid);
-      
-      setUserState(prev => ({ 
-        ...prev, 
-        email: emailLower,
-        credits 
-      }));
       
       setScreen(Screen.ONBOARDING);
       
@@ -937,13 +1417,7 @@ const LoginScreen: React.FC<{
       if (user) {
         setUserId(user.uid);
         await saveUserEmail(user.uid, emailLower);
-        const credits = await getOrCreateUserCredits(user.uid);
-        
-        setUserState(prev => ({ 
-          ...prev, 
-          email: emailLower,
-          credits 
-        }));
+        await getOrCreateUserCredits(user.uid);
       }
       
       alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVerifique seu email para mais informações.');
@@ -1004,7 +1478,7 @@ const LoginScreen: React.FC<{
             <button 
               onClick={handleGoogleLogin}
               disabled={isLoading}
-              className="w-full py-4 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full py-4 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-[#2E0249] hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path
@@ -1074,9 +1548,13 @@ const ProfileScreen: React.FC<{
     onUpdateProfile: (name: string, image: string | null, cellphone?: string, taxId?: string) => void;
     onReuse: (item: HistoryItem) => void;
     onOpenFAQ: () => void;
+    onOpenCheckout?: (url: string) => void;
     setUserId: (uid: string) => void;
     setScreen: (screen: Screen) => void;
-}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, setUserId, setScreen }) => {
+    isAdmin?: boolean;
+    onOpenAdmin?: () => void;
+    onSyncCredits?: () => void;
+}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits }) => {
     const [editingName, setEditingName] = useState(false);
     const [showLogoutModal, setShowLogoutModal] = useState(false);
     const [newName, setNewName] = useState(userState.name || '');
@@ -1142,16 +1620,67 @@ const ProfileScreen: React.FC<{
       }
     };
 
+    const handleDownloadHistory = async (item: HistoryItem) => {
+        if (!item.generatedImage) return;
+
+        try {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.src = item.generatedImage;
+            
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0);
+
+            const link = document.createElement('a');
+            link.download = `pandora-look-${new Date().getTime()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        } catch (err) {
+            console.error('Erro ao baixar imagem:', err);
+            // Fallback: tenta abrir em nova aba se o canvas falhar
+            window.open(item.generatedImage, '_blank');
+        }
+    };
+
+    const handleDeleteSingle = async (item: HistoryItem) => {
+        try {
+            const { deleteDoc, doc: firestoreDoc } = await import('firebase/firestore');
+            await deleteDoc(firestoreDoc(db, 'users', userId, 'history', item.id));
+            
+            setUserState(prev => ({
+              ...prev,
+              history: prev.history.filter(h => h.id !== item.id)
+            }));
+            
+            setSelectedHistoryItem(null);
+        } catch (err) {
+            console.error('Erro ao deletar item:', err);
+        }
+    };
+
     const handleSaveProfile = () => {
         onUpdateProfile(newName, image);
     };
 
+    const isPremium = userState.subscriptionTier === 'premium' || 
+                      (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
+                      (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
+
     return (
         <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative overflow-y-auto">
             {/* Header removido - agora no MainLayout */}
-            <div className="text-center px-6 py-4 bg-white z-20 shadow-sm shrink-0">
-                <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Meu Perfil e Créditos</h2>
-            </div>
+
+            {/* Feed de Achados removido daqui - agora apenas no modal do header */}
+
             {selectedHistoryItem && (
                 <div className="fixed inset-0 z-50 bg-black/95 flex flex-col animate-fade-in p-6 overflow-y-auto">
                     <div className="flex justify-between items-center mb-6">
@@ -1168,6 +1697,18 @@ const ProfileScreen: React.FC<{
                                 {new Date(selectedHistoryItem.date).toLocaleDateString()}
                             </div>
                         </div>
+
+                        {/* Elogio da Estilista */}
+                        {selectedHistoryItem.compliment && (
+                            <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 relative">
+                                <div className="absolute -top-3 left-4 bg-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Sparkles size={10} /> Elogio da Estilista
+                                </div>
+                                <p className="text-purple-900 text-sm italic font-medium leading-relaxed">
+                                    "{selectedHistoryItem.compliment}"
+                                </p>
+                            </div>
+                        )}
 
                         <div className="flex gap-4">
                             <div className="flex-1 bg-white/10 rounded-xl p-3 border border-white/10">
@@ -1197,10 +1738,16 @@ const ProfileScreen: React.FC<{
                         </Button>
                         
                         <div className="grid grid-cols-2 gap-3">
-                             <button className="flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl font-medium hover:bg-white/20 transition-colors">
+                             <button 
+                                onClick={() => selectedHistoryItem && handleDownloadHistory(selectedHistoryItem)}
+                                className="flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl font-medium hover:bg-white/20 transition-colors"
+                             >
                                 <Download size={18} /> Baixar
                              </button>
-                             <button className="flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl font-medium hover:bg-white/20 transition-colors">
+                             <button 
+                                onClick={() => selectedHistoryItem && handleDeleteSingle(selectedHistoryItem)}
+                                className="flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl font-medium hover:bg-white/20 transition-colors"
+                             >
                                 <Trash2 size={18} /> Excluir
                              </button>
                         </div>
@@ -1208,14 +1755,6 @@ const ProfileScreen: React.FC<{
                 </div>
             )}
 
-            <div className="px-6 pt-6 pb-2">
-                <button 
-                    onClick={onBack}
-                    className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-700 transition-colors"
-                >
-                    <ArrowLeft size={24} />
-                </button>
-            </div>
 
             <div className="flex-1 flex flex-col items-center px-6 pt-4 pb-12">
                 {/* Profile Header */}
@@ -1318,19 +1857,197 @@ const ProfileScreen: React.FC<{
                       <span style={{ fontSize: '15px', fontWeight: '500' }}>
                         {userState.name || 'Sem nome'}
                       </span>
-                      <button
-                        onClick={() => setEditingName(true)}
-                        style={{
-                          padding: '6px 12px',
-                          background: '#9333ea',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                        }}>
-                        Editar
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={onSyncCredits}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold hover:bg-purple-200 transition-colors"
+                          title="Sincronizar créditos de outras contas"
+                        >
+                          <RefreshCw size={14} /> Sincronizar
+                        </button>
+                        <button
+                          onClick={() => setEditingName(true)}
+                          style={{
+                            padding: '6px 12px',
+                            background: '#9333ea',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '13px',
+                          }}>
+                          Editar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Gamification Section */}
+                <div className="w-full max-w-md space-y-4 mb-8">
+                  {/* Badges and Stats */}
+                  <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-[#2E0249] flex items-center gap-2">
+                        <Trophy size={16} className="text-yellow-500" /> Sua Jornada
+                      </h3>
+                      <span className="text-[10px] font-bold px-2 py-1 bg-purple-100 text-purple-700 rounded-full uppercase">
+                        {userState.badge || 'Iniciante'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between items-end gap-2 px-2">
+                      {[
+                        { label: 'Bronze', min: 20, color: 'text-orange-600', bg: 'bg-orange-100' },
+                        { label: 'Prata', min: 40, color: 'text-gray-400', bg: 'bg-gray-100' },
+                        { label: 'Ouro', min: 60, color: 'text-yellow-600', bg: 'bg-yellow-100' },
+                        { label: 'Diamante', min: 100, color: 'text-blue-500', bg: 'bg-blue-50' }
+                      ].map((b, i) => (
+                        <div key={i} className="flex flex-col items-center gap-1">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${userState.totalPhotosGenerated! >= b.min ? b.bg : 'bg-gray-50 opacity-40'}`}>
+                            <Star size={18} className={userState.totalPhotosGenerated! >= b.min ? b.color : 'text-gray-300'} fill={userState.totalPhotosGenerated! >= b.min ? 'currentColor' : 'none'} />
+                          </div>
+                          <span className="text-[9px] font-bold text-gray-500">{b.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div className="mt-4 pt-4 border-t border-gray-50">
+                      <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1 uppercase">
+                        <span>Progresso de Fotos</span>
+                        <span>{userState.totalPhotosGenerated || 0} fotos</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-purple-600 transition-all duration-1000" 
+                          style={{ width: `${Math.min(100, ((userState.totalPhotosGenerated || 0) / 100) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Daily Rewards */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Roulette */}
+                    <button 
+                      onClick={async () => {
+                        const today = new Date().toISOString().split('T')[0];
+                        if (userState.lastRouletteSpin === today) {
+                          alert('Você já girou a roleta hoje! Volte amanhã.');
+                          return;
+                        }
+                        const win = await spinRoulette(userId!);
+                        if (win > 0) {
+                          alert(`🎉 Parabéns! Você ganhou ${win} créditos na roleta!`);
+                        }
+                      }}
+                      className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${userState.lastRouletteSpin === new Date().toISOString().split('T')[0] ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-purple-100 hover:border-purple-400 shadow-sm'}`}
+                    >
+                      <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center text-purple-600">
+                        <RotateCw size={20} />
+                      </div>
+                      <span className="text-xs font-bold text-[#2E0249]">Roleta Diária</span>
+                      <span className="text-[9px] text-gray-400 uppercase">Gire e Ganhe</span>
+                    </button>
+
+                    {/* Chest */}
+                    <button 
+                      onClick={async () => {
+                        const today = new Date().toISOString().split('T')[0];
+                        if (userState.dailyUsage?.claimedChest) {
+                          alert('Você já resgatou seu bônus de uso hoje! Volte amanhã.');
+                          return;
+                        }
+                        if (userState.dailyUsage?.date === today && userState.dailyUsage.count >= 30) {
+                          const win = await claimChest(userId!);
+                          if (win > 0) {
+                            alert('🎁 Você abriu o baú e ganhou 10 créditos extras!');
+                          }
+                        } else {
+                          alert(`Faltam ${30 - (userState.dailyUsage?.count || 0)} créditos de uso hoje para liberar o baú!`);
+                        }
+                      }}
+                      className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${userState.dailyUsage?.claimedChest ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-pink-100 hover:border-pink-400 shadow-sm'}`}
+                    >
+                      <div className="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center text-pink-600">
+                        <Gift size={20} />
+                      </div>
+                      <span className="text-xs font-bold text-[#2E0249]">Baú de Uso</span>
+                      <span className="text-[9px] text-gray-400 uppercase">Use 30 e Ganhe</span>
+                    </button>
+                  </div>
+
+                  {/* Credit Release Timeline */}
+                  {userState.subscriptionStartDate && (
+                    <div className="bg-gray-900 rounded-2xl p-4 text-white shadow-lg">
+                      <h4 className="text-xs font-bold uppercase tracking-widest text-purple-400 mb-4">Cronograma de Créditos</h4>
+                      <div className="space-y-4">
+                        {(userState.lastPurchaseAmount === 19.9 || userState.lastPurchaseAmount === 20) ? (
+                          // Basic Timeline
+                          <>
+                            <div className="flex items-center gap-3">
+                              <div className="w-2 h-2 rounded-full bg-green-500" />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-bold">Imediato: 60 Créditos</p>
+                                <p className="text-[9px] text-gray-400">Recebido no ato da compra</p>
+                              </div>
+                              <Check size={14} className="text-green-500" />
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 80 ? 'bg-green-500' : 'bg-gray-600'}`} />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-bold">Dia 2: +20 Créditos</p>
+                                <p className="text-[9px] text-gray-400">Liberação automática</p>
+                              </div>
+                              {userState.creditsReleased! >= 80 && <Check size={14} className="text-green-500" />}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 100 ? 'bg-green-500' : 'bg-gray-600'}`} />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-bold">Dia 4: +20 Créditos</p>
+                                <p className="text-[9px] text-gray-400">Finalização do pacote</p>
+                              </div>
+                              {userState.creditsReleased! >= 100 && <Check size={14} className="text-green-500" />}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 120 ? 'bg-green-500' : 'bg-gray-600'}`} />
+                              <div className="flex-1 text-purple-300">
+                                <p className="text-[11px] font-bold">Dia 6: +20 BÔNUS</p>
+                                <p className="text-[9px] text-purple-400/60">Presente Pandora AI</p>
+                              </div>
+                              {userState.creditsReleased! >= 120 && <Check size={14} className="text-green-500" />}
+                            </div>
+                          </>
+                        ) : (
+                          // Premium Timeline
+                          <>
+                            <div className="flex items-center gap-3">
+                              <div className="w-2 h-2 rounded-full bg-green-500" />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-bold">Imediato: 150 Créditos</p>
+                                <p className="text-[9px] text-gray-400">Recebido no ato da compra</p>
+                              </div>
+                              <Check size={14} className="text-green-500" />
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 250 ? 'bg-green-500' : 'bg-gray-600'}`} />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-bold">Dia 4: +100 Créditos</p>
+                                <p className="text-[9px] text-gray-400">Liberação automática</p>
+                              </div>
+                              {userState.creditsReleased! >= 250 && <Check size={14} className="text-green-500" />}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 300 ? 'bg-green-500' : 'bg-gray-600'}`} />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-bold">Dia 6: +50 Créditos</p>
+                                <p className="text-[9px] text-gray-400">Finalização do pacote</p>
+                              </div>
+                              {userState.creditsReleased! >= 300 && <Check size={14} className="text-green-500" />}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1362,7 +2079,7 @@ const ProfileScreen: React.FC<{
                         width: '48px',
                         height: '48px',
                         borderRadius: '12px',
-                        background: userState.lastPlan === 'Premium' 
+                        background: isPremium 
                           ? 'linear-gradient(135deg, #9333ea, #ec4899)' 
                           : 'linear-gradient(135deg, #7c3aed, #a855f7)',
                         display: 'flex',
@@ -1371,7 +2088,7 @@ const ProfileScreen: React.FC<{
                         fontSize: '22px',
                         flexShrink: 0,
                       }}>
-                        {userState.lastPlan === 'Premium' ? '👑' : '⚡'}
+                        {isPremium ? '👑' : '⚡'}
                       </div>
 
                       {/* Infos do plano */}
@@ -1382,7 +2099,7 @@ const ProfileScreen: React.FC<{
                           color: '#6b21a8',
                           marginBottom: '2px',
                         }}>
-                          Plano {userState.lastPlan}
+                          {isPremium ? 'Plano Premium' : (userState.lastPlan || 'Plano Básico')}
                         </div>
                         <div style={{
                           fontSize: '13px',
@@ -1391,12 +2108,21 @@ const ProfileScreen: React.FC<{
                         }}>
                           {userState.lastPurchaseCredits 
                             ? `${userState.lastPurchaseCredits} créditos` 
-                            : userState.lastPlan === 'Premium' ? '300 créditos' : '100 créditos'}
+                            : isPremium ? '300 créditos' : '100 créditos'}
                           {userState.lastPurchaseAmount 
                             ? ` · R$ ${Number(userState.lastPurchaseAmount).toFixed(2).replace('.', ',')}` 
                             : ''}
                         </div>
-                        {userState.lastPurchaseDate && (
+                        {userState.subscriptionExpiresAt && userState.subscriptionTier === 'premium' ? (
+                          <div style={{
+                            fontSize: '11px',
+                            color: '#db2777',
+                            marginTop: '2px',
+                            fontWeight: 'bold'
+                          }}>
+                            Expira em: {new Date(userState.subscriptionExpiresAt).toLocaleDateString('pt-BR')}
+                          </div>
+                        ) : userState.lastPurchaseDate && (
                           <div style={{
                             fontSize: '11px',
                             color: '#a855f7',
@@ -1500,8 +2226,12 @@ const ProfileScreen: React.FC<{
                     {/* Botão Recarregar */}
                     <button
                       onClick={() => {
-                        // Abre o link direto do checkout
-                        window.open('https://checkout.pandoravesteai.com/', '_blank');
+                        // Abre o link direto do checkout dentro do app
+                        if (onOpenCheckout) {
+                          onOpenCheckout('https://checkout.pandoravesteai.com/');
+                        } else {
+                          window.open('https://checkout.pandoravesteai.com/', '_blank');
+                        }
                       }}
                       style={{
                         width: '100%',
@@ -1539,8 +2269,8 @@ const ProfileScreen: React.FC<{
                 {/* History Section */}
                 <div className="w-full">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                            <RefreshCw size={18} className="text-purple-600" /> Histórico
+                        <h3 className="text-lg font-bold text-[#2E0249] flex items-center gap-2">
+                            <Box size={18} className="text-purple-600" /> Meu Closet Virtual
                         </h3>
                         <div className="flex items-center gap-2">
                           {selectionMode ? (
@@ -1557,6 +2287,18 @@ const ProfileScreen: React.FC<{
                                 </button>
                               )}
                               <button
+                                onClick={() => {
+                                  if (selectedItems.length === history.length) {
+                                    setSelectedItems([]);
+                                  } else {
+                                    setSelectedItems(history.map(item => item.id));
+                                  }
+                                }}
+                                className="text-xs text-purple-600 font-bold px-3 py-1.5 rounded-full border border-purple-200"
+                              >
+                                {selectedItems.length === history.length ? 'Desmarcar Tudo' : 'Selecionar Tudo'}
+                              </button>
+                              <button
                                 onClick={() => { setSelectionMode(false); setSelectedItems([]); }}
                                 className="text-xs text-gray-500 font-bold px-3 py-1.5 rounded-full border border-gray-200"
                               >
@@ -1567,12 +2309,23 @@ const ProfileScreen: React.FC<{
                             <>
                               <span className="text-xs text-gray-400">{history.length} criações</span>
                               {history.length > 0 && (
-                                <button
-                                  onClick={() => setSelectionMode(true)}
-                                  className="text-xs text-purple-600 font-bold px-3 py-1.5 rounded-full border border-purple-200"
-                                >
-                                  Selecionar
-                                </button>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => setSelectionMode(true)}
+                                    className="text-xs text-purple-600 font-bold px-3 py-1.5 rounded-full border border-purple-200"
+                                  >
+                                    Selecionar
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setSelectionMode(true);
+                                      setSelectedItems(history.map(item => item.id));
+                                    }}
+                                    className="text-xs text-purple-600 font-bold px-3 py-1.5 rounded-full border border-purple-200"
+                                  >
+                                    Tudo
+                                  </button>
+                                </div>
                               )}
                             </>
                           )}
@@ -1665,6 +2418,30 @@ const ProfileScreen: React.FC<{
                   <p>© 2026 Pandora AI. Todos os direitos reservados.</p>
                   <p className="opacity-50">Versão do Aplicativo: Versão 1.0.0 (Build 20260226)</p>
                 </div>
+
+                {/* Botão Admin */}
+                {isAdmin && (
+                  <button
+                    onClick={onOpenAdmin}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      marginTop: '20px',
+                      background: '#f97316',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '800',
+                      textTransform: 'uppercase',
+                      letterSpacing: '1px',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 15px rgba(249, 115, 22, 0.3)',
+                      transition: 'all 0.3s ease'
+                    }}>
+                    Painel Administrativo 🛠️
+                  </button>
+                )}
 
                 {/* Botão Sair */}
                 <button
@@ -1885,11 +2662,15 @@ const ProfileScreen: React.FC<{
 
 // --- FAQ Screen ---
 const FAQScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   return (
-    <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative overflow-y-auto">
+    <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative">
       {/* Header removido - agora no MainLayout */}
-      <div className="flex-1 flex flex-col px-6 pt-6 pb-8 overflow-y-auto no-scrollbar">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Perguntas Frequentes</h2>
+      <div className="flex-1 flex flex-col px-6 pt-6 pb-8">
+        <h2 className="text-2xl font-bold text-[#2E0249] mb-6">Perguntas Frequentes</h2>
         
         <div className="space-y-3">
             {[
@@ -1962,14 +2743,14 @@ const getBannerConfig = (credits: number) => {
   if (credits === 0) {
     return {
       level: 6,
-      backgroundImage: 'linear-gradient(135deg, #1a1a2e, #3d0066, #1a1a2e, #3d0066)',
+      backgroundImage: 'linear-gradient(135deg, #2E0249, #4B0082, #2E0249, #4B0082)',
       backgroundSize: '400% 400%',
       icon: '🚫',
       title: 'Seus créditos acabaram',
-      text: 'Você está perdendo looks incríveis agora. Cada dia sem o Pandora AI é um dia com o guarda-roupa errado.',
-      buttonText: '✨ Quero meus looks agora',
+      text: 'Você está perdendo looks incríveis agora. Recarregue para continuar!',
+      buttonText: '✨ Recarregar agora',
       buttonPulse: 'animate-pulse-strong',
-      shadow: 'shadow-[0_10px_30px_rgba(0,0,0,0.5)]',
+      shadow: 'shadow-[0_10px_30px_rgba(46,2,73,0.5)]',
       buttonBorder: 'border-[#FFD700]',
       // Animations
       bgAnimation: 'level6Gradient 1.5s ease infinite',
@@ -1985,15 +2766,15 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 10) {
     return {
       level: 5,
-      backgroundImage: 'linear-gradient(135deg, #DC143C, #8B0000, #DC143C)',
+      backgroundImage: 'linear-gradient(135deg, #6A00F4, #C90076, #6A00F4)',
       backgroundSize: '200% 200%',
       icon: '🔥',
       title: 'Só 10 créditos restantes!',
-      text: 'Não deixe a inspiração parar na hora errada. Recarregue antes que acabe!',
+      text: 'Não deixe a inspiração parar. Recarregue antes que acabe!',
       buttonText: '🔥 Recarregar agora',
       buttonPulse: 'animate-pulse-soft',
-      shadow: 'shadow-[0_8px_25px_rgba(220,20,60,0.4)]',
-      buttonBorder: 'border-purple-500',
+      shadow: 'shadow-[0_8px_25px_rgba(106,0,244,0.4)]',
+      buttonBorder: 'border-white',
       // Animations
       bgAnimation: 'level5Gradient 2s ease infinite',
       iconAnimation: 'pulse 1s ease-in-out infinite, iconSpin 2s ease-in-out infinite',
@@ -2002,20 +2783,20 @@ const getBannerConfig = (credits: number) => {
       shimmerDuration: 1.5,
       buttonAnimation: 'buttonGlow 1s ease-in-out infinite',
       buttonBg: 'linear-gradient(135deg, #FF4500, #DC143C)',
-      containerBorder: '2px solid rgba(220, 20, 60, 0.5)'
+      containerBorder: '2px solid rgba(106, 0, 244, 0.5)'
     };
   }
   if (credits <= 20) {
     return {
       level: 4,
-      backgroundImage: 'linear-gradient(135deg, #FF7F50, #FF6347, #FF7F50)',
+      backgroundImage: 'linear-gradient(135deg, #7B2CBF, #9D4EDD, #7B2CBF)',
       backgroundSize: '200% 200%',
       icon: '🔥',
       title: 'Apenas 20 créditos!',
-      text: 'Está acabando! Garanta mais créditos antes que seja tarde demais.',
-      buttonText: '🔥 Recarregar agora',
-      shadow: 'shadow-[0_6px_20px_rgba(255,127,80,0.3)]',
-      buttonBorder: 'border-purple-500',
+      text: 'Está acabando! Garanta mais créditos e continue criando.',
+      buttonText: '🔥 Recarregar',
+      shadow: 'shadow-[0_6px_20px_rgba(123,44,191,0.3)]',
+      buttonBorder: 'border-white',
       // Animations
       bgAnimation: 'level4Gradient 2.5s ease infinite',
       iconAnimation: 'pulse 1.5s ease-in-out infinite, iconSpin 3s ease-in-out infinite',
@@ -2023,20 +2804,20 @@ const getBannerConfig = (credits: number) => {
       shadowAnimation: 'level4Pulse 1.5s ease-in-out infinite, level4Shake 3s ease-in-out infinite',
       shimmerDuration: 2,
       buttonAnimation: 'buttonGlow 1.5s ease-in-out infinite',
-      containerBorder: '2px solid rgba(255, 99, 71, 0.5)'
+      containerBorder: '2px solid rgba(123, 44, 191, 0.5)'
     };
   }
   if (credits <= 30) {
     return {
       level: 3,
-      backgroundImage: 'linear-gradient(135deg, #FF9F0A, #FF8C00, #FF9F0A)',
+      backgroundImage: 'linear-gradient(135deg, #9D4EDD, #C77DFF, #9D4EDD)',
       backgroundSize: '200% 200%',
       icon: '⚡',
       title: '30 créditos restantes',
-      text: 'Está na metade! Recarregue agora e continue se reinventando todo dia.',
-      buttonText: '+ Recarregar agora',
-      shadow: 'shadow-[0_4px_15px_rgba(255,159,10,0.2)]',
-      buttonBorder: 'border-purple-500',
+      text: 'Está na metade! Recarregue agora e continue se reinventando.',
+      buttonText: '+ Recarregar',
+      shadow: 'shadow-[0_4px_15px_rgba(157,78,221,0.2)]',
+      buttonBorder: 'border-white',
       // Animations
       bgAnimation: 'level3Gradient 3s ease infinite',
       iconAnimation: 'pulse 2s ease-in-out infinite, iconBounce 2s ease-in-out infinite',
@@ -2044,19 +2825,19 @@ const getBannerConfig = (credits: number) => {
       shadowAnimation: 'level3Pulse 2s ease-in-out infinite',
       shimmerDuration: 3,
       buttonAnimation: 'buttonGlow 2s ease-in-out infinite',
-      containerBorder: '2px solid rgba(255, 159, 10, 0.3)'
+      containerBorder: '2px solid rgba(157, 78, 221, 0.3)'
     };
   }
   if (credits <= 40) {
     return {
       level: 2,
-      backgroundImage: 'linear-gradient(135deg, #FFD93D, #FFA500, #FFD93D)',
+      backgroundImage: 'linear-gradient(135deg, #C77DFF, #E0AAFF, #C77DFF)',
       backgroundSize: '200% 200%',
       icon: '⚡',
       title: '40 créditos restantes',
-      text: 'Está indo bem! Garanta mais créditos e continue explorando novos looks.',
+      text: 'Garanta mais créditos e continue explorando novos looks.',
       buttonText: '+ Recarregar',
-      shadow: 'shadow-[0_4px_12px_rgba(255,217,61,0.15)]',
+      shadow: 'shadow-[0_4px_12px_rgba(199,125,255,0.15)]',
       buttonBorder: 'border-purple-500',
       // Animations
       bgAnimation: 'level2Gradient 4s ease infinite',
@@ -2070,13 +2851,13 @@ const getBannerConfig = (credits: number) => {
   if (credits <= 50) {
     return {
       level: 1,
-      backgroundImage: 'linear-gradient(135deg, #FFE17B, #FFCD3C, #FFE17B)',
+      backgroundImage: 'linear-gradient(135deg, #E0AAFF, #F7EFFF, #E0AAFF)',
       backgroundSize: '200% 200%',
       icon: '✨',
       title: '50 créditos restantes',
-      text: 'Você ainda tem créditos, mas considere recarregar para não perder o ritmo!',
+      text: 'Considere recarregar para não perder o ritmo!',
       buttonText: '+ Recarregar',
-      shadow: 'shadow-[0_4px_10px_rgba(255,225,123,0.1)]',
+      shadow: 'shadow-[0_4px_10px_rgba(224,170,255,0.1)]',
       buttonBorder: 'border-purple-500',
       // Animations
       bgAnimation: 'level1Gradient 5s ease infinite',
@@ -2096,7 +2877,7 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
 
   return (
     <div 
-      className={`w-full my-4 px-6 py-5 flex flex-col sm:flex-row items-center gap-4 transition-all duration-500 relative overflow-hidden ${config.shadow}`}
+      className={`w-full my-1 px-4 py-2 flex items-center gap-3 rounded-xl transition-all duration-500 relative overflow-hidden ${config.shadow}`}
       style={{ 
         backgroundImage: config.backgroundImage,
         backgroundSize: config.backgroundSize,
@@ -2114,20 +2895,20 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
       />
 
       <div 
-        className="text-4xl sm:text-3xl flex-shrink-0 z-10"
+        className="text-lg flex-shrink-0 z-10"
         style={{ animation: config.iconAnimation }}
       >
         {config.icon}
       </div>
       
-      <div className="flex-1 text-center sm:text-left z-10">
+      <div className="flex-1 text-left z-10">
         <h4 
-          className="text-white font-bold text-lg leading-tight mb-1"
+          className="text-white font-bold text-sm leading-tight"
           style={{ animation: config.titleAnimation }}
         >
           {config.title}
         </h4>
-        <p className="text-white/90 text-xs leading-relaxed">
+        <p className="text-white/80 text-[10px] leading-tight">
           {config.text}
         </p>
       </div>
@@ -2135,7 +2916,7 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
       <button 
         onClick={onOpenCredits}
         className={`
-          px-5 py-2.5 bg-white text-purple-700 font-bold text-sm rounded-full border-2 
+          px-4 py-1.5 bg-white text-purple-700 font-bold text-[11px] rounded-full border-2 
           transition-all hover:scale-105 active:scale-95 whitespace-nowrap z-10
           ${config.buttonBorder}
         `}
@@ -2151,24 +2932,74 @@ const CreditAlertBanner: React.FC<{ credits: number; onOpenCredits: () => void }
 
 const PremiumBanner: React.FC<{ onUpgrade: () => void }> = ({ onUpgrade }) => {
   return (
-    <div className="w-full my-4 px-6 py-4 bg-gradient-to-r from-purple-600 to-pink-500 flex flex-col sm:flex-row items-center gap-4 shadow-lg rounded-2xl relative overflow-hidden animate-pulse-soft">
-      <div className="absolute top-0 right-0 p-2 opacity-20">
-        <Sparkles size={40} className="text-white" />
+    <div className="w-full my-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-500 flex items-center gap-3 shadow-lg rounded-xl relative overflow-hidden animate-pulse-soft">
+      <div className="absolute top-0 right-0 p-1 opacity-10">
+        <Sparkles size={30} className="text-white" />
       </div>
-      <div className="flex-1 text-center sm:text-left z-10">
-        <h4 className="text-white font-bold text-lg leading-tight mb-1 flex items-center gap-2 justify-center sm:justify-start">
-          <Zap size={20} className="text-yellow-300" /> Quero o Plano Premium 🚀
+      <div className="flex-1 text-left z-10">
+        <h4 className="text-white font-bold text-sm leading-tight flex items-center gap-1.5 justify-start">
+          <Zap size={16} className="text-yellow-300" /> Plano Premium 🚀
         </h4>
-        <p className="text-white/90 text-xs leading-relaxed">
-          Libere 360°, formatos Instagram/Stories e ganhe 300 créditos agora!
+        <p className="text-white/80 text-[10px] leading-tight">
+          Libere 360°, formatos Instagram e ganhe 300 créditos!
         </p>
       </div>
       <button 
         onClick={onUpgrade}
-        className="px-6 py-2 bg-white text-purple-700 font-bold text-sm rounded-full shadow-md hover:scale-105 active:scale-95 transition-all z-10"
+        className="px-4 py-1.5 bg-white text-purple-700 font-bold text-[11px] rounded-full shadow-md hover:scale-105 active:scale-95 transition-all z-10"
       >
-        Assinar por R$29,90
+        Assinar
       </button>
+    </div>
+  );
+};
+
+const VipGroupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl relative border border-purple-100"
+      >
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 z-20 w-10 h-10 bg-white/80 hover:bg-white text-[#2E0249] rounded-full flex items-center justify-center shadow-lg backdrop-blur-md transition-all active:scale-90"
+        >
+          <X size={20} />
+        </button>
+
+        <div className="p-8 flex flex-col items-center text-center">
+          {/* Main Image */}
+          <div className="w-full mb-6 mt-4">
+            <img 
+              src="https://i.postimg.cc/GhLVXkhh/Untitled-design-(5).jpg" 
+              alt="Promo" 
+              className="w-full h-64 object-cover rounded-2xl border-2 border-purple-500 shadow-md"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+
+          <h3 className="text-xl font-extrabold text-[#2E0249] mb-4 leading-tight">
+            Entre agora no grupo exclusivo de promos e cupons feito para você!
+          </h3>
+          
+          <p className="text-sm text-gray-600 mb-8 font-medium leading-relaxed">
+            Roupas exclusivas que estão em alta com <span className="text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded-md">60% de desconto</span>.
+          </p>
+
+          <button
+            onClick={() => window.open('https://chat.whatsapp.com/JLFXFOrgpjx1TKCeWkXcnb?mode=gi_t', '_blank')}
+            className="w-full bg-gradient-to-r from-[#6A00F4] to-[#EC4899] text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-purple-200 hover:opacity-90 active:scale-[0.97] transition-all flex items-center justify-center gap-3 group"
+          >
+            <MessageCircle size={22} className="group-hover:rotate-12 transition-transform" />
+            Entrar no Grupo VIP
+          </button>
+          
+        </div>
+      </motion.div>
     </div>
   );
 };
@@ -2178,12 +3009,98 @@ const MainLayout: React.FC<{
   credits: number;
   onOpenCredits: () => void;
   onOpenFAQ: () => void;
+  onOpenPremiumModal?: () => void;
   showBanner?: boolean;
   isPremium?: boolean;
   onBack?: () => void;
   backIcon?: 'arrow' | 'x';
-}> = ({ children, credits, onOpenCredits, onOpenFAQ, showBanner = true, isPremium = false, onBack, backIcon = 'arrow' }) => {
+  styleTags?: string[];
+}> = ({ 
+  children, 
+  credits, 
+  onOpenCredits, 
+  onOpenFAQ, 
+  onOpenPremiumModal, 
+  showBanner = true, 
+  isPremium = false, 
+  onBack, 
+  backIcon = 'arrow', 
+  styleTags = []
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo(0, 0);
+    }
+  }, [children]);
+
   const [showCreditsInfo, setShowCreditsInfo] = useState(false);
+  const [showFeedModal, setShowFeedModal] = useState(false);
+  const [showVipGroupModal, setShowVipGroupModal] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [hackedDeals, setHackedDeals] = useState<{title: string, price: string, platform: string, url: string}[]>([]);
+
+  const scanForDeals = async () => {
+    setIsScanning(true);
+    setHackedDeals([]);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const prompt = `Encontre 5 promoções reais e atuais de roupas (moda feminina ou masculina) nos sites Mercado Livre Brasil, Shopee Brasil e Shein Brasil. 
+      Retorne apenas um JSON válido com um array de objetos contendo: title (nome do produto), price (preço em R$), platform (nome da loja), url (link direto da oferta).
+      Foque em itens com mais de 30% de desconto.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json"
+        }
+      });
+
+      const text = response.text;
+      const data = JSON.parse(text);
+      if (Array.isArray(data)) {
+        setHackedDeals(data);
+      } else if (data.deals && Array.isArray(data.deals)) {
+        setHackedDeals(data.deals);
+      }
+    } catch (error) {
+      // Erro silenciado para o scanner não ser intrusivo
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const personalizedOffers = useMemo(() => {
+    const today = new Date();
+    const dateSeed = today.getDate() + today.getMonth() + today.getFullYear();
+    
+    if (styleTags.length === 0) {
+      return [];
+    }
+    
+    // Pega as tags únicas e mais recentes
+    const uniqueTags = [...new Set(styleTags)].reverse().slice(0, 6);
+    return uniqueTags.map((tag, i) => {
+      // Gera um desconto "aleatório" mas consistente para o dia
+      const tagSeed = tag.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const discount = ((dateSeed + tagSeed + i) % 30) + 10;
+      
+      return {
+        tag,
+        type: i === 0 ? 'Super Desconto' : (i % 2 === 0 ? 'Oferta do Dia' : 'Promoção'),
+        discount: `${discount}%`
+      };
+    });
+  }, [styleTags]);
+
+  const lastUpdate = useMemo(() => {
+    const d = new Date();
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  }, []);
 
   const badgeConfig = (() => {
     if (credits <= 10) {
@@ -2221,7 +3138,7 @@ const MainLayout: React.FC<{
             <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4 text-purple-600">
               <Zap size={32} />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Sistema de Créditos</h3>
+            <h3 className="text-xl font-bold text-[#2E0249] mb-2">Sistema de Créditos</h3>
             <p className="text-gray-600 text-sm mb-6">
               Cada geração de look consome 1 crédito. Você pode recarregar seus créditos a qualquer momento para continuar transformando seu estilo!
             </p>
@@ -2232,31 +3149,184 @@ const MainLayout: React.FC<{
         </div>
       )}
 
-      <div className="w-full h-16 bg-white flex items-center justify-between px-6 sticky top-0 z-50 border-b border-gray-50/50 backdrop-blur-sm bg-white/95">
-        <div className="flex items-center gap-2">
+      {showFeedModal && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-purple-50">
+              <div className="flex flex-col">
+                <h3 className="text-sm font-bold text-purple-900 flex items-center gap-2">
+                  <Sparkles size={16} /> Feed de Achados
+                </h3>
+                <span className="text-[8px] font-bold text-purple-400 uppercase tracking-widest">Atualizado hoje: {lastUpdate}</span>
+              </div>
+              <button onClick={() => setShowFeedModal(false)} className="text-purple-400 hover:text-purple-600">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
+              <div className="bg-purple-50 rounded-2xl p-4 mb-4 border border-purple-100 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-purple-600"></div>
+                <p className="text-[10px] text-purple-800 leading-relaxed italic">
+                  "Sincronizamos seu closet virtual com as melhores ofertas do dia. Aproveite os descontos exclusivos para você!"
+                </p>
+              </div>
+
+              {/* Hacker Scanner Button */}
+              <button 
+                onClick={scanForDeals}
+                disabled={isScanning}
+                className="w-full mb-6 p-4 bg-black rounded-2xl border border-green-500/30 flex flex-col items-center gap-2 group relative overflow-hidden active:scale-95 transition-all"
+              >
+                {isScanning && (
+                  <div className="absolute inset-0 bg-green-500/10 animate-pulse"></div>
+                )}
+                <div className="flex items-center gap-2 text-green-500">
+                  <Terminal size={16} className={isScanning ? "animate-bounce" : ""} />
+                  <span className="text-[10px] font-mono font-bold tracking-widest uppercase">
+                    {isScanning ? "Rastreando Promoções..." : "Ativar Scanner Hacker"}
+                  </span>
+                </div>
+                <p className="text-[8px] font-mono text-green-500/60 text-center">
+                  {isScanning ? "Interceptando pacotes de dados..." : "Busca profunda em tempo real (ML, Shopee, Shein)"}
+                </p>
+              </button>
+
+              {isScanning ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-4">
+                  <div className="relative w-20 h-20">
+                    <div className="absolute inset-0 border-2 border-green-500/20 rounded-full"></div>
+                    <div className="absolute inset-0 border-t-2 border-green-500 rounded-full animate-spin"></div>
+                    <div className="absolute inset-4 border border-green-500/40 rounded-full animate-pulse"></div>
+                  </div>
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-[10px] font-mono text-green-500 animate-pulse">SCANNING_NETWORK...</p>
+                    <div className="flex gap-1">
+                      <div className="w-1 h-1 bg-green-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-1 h-1 bg-green-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-1 h-1 bg-green-500 rounded-full animate-bounce"></div>
+                    </div>
+                  </div>
+                </div>
+              ) : hackedDeals.length > 0 ? (
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-[10px] font-mono font-bold text-green-600 uppercase tracking-widest">Resultados Encontrados</h4>
+                    <span className="text-[8px] font-mono text-green-500/50">MATCH_COUNT: {hackedDeals.length}</span>
+                  </div>
+                  {hackedDeals.map((deal, i) => (
+                    <a 
+                      key={i}
+                      href={deal.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block p-3 bg-black border border-green-500/20 rounded-xl hover:border-green-500/50 transition-all group"
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-[8px] font-mono text-green-500/60 uppercase">{deal.platform}</span>
+                        <span className="text-[10px] font-mono font-bold text-green-400">{deal.price}</span>
+                      </div>
+                      <p className="text-[11px] font-mono text-white leading-tight mb-2 group-hover:text-green-400 transition-colors">{deal.title}</p>
+                      <div className="flex items-center justify-between">
+                        <div className="flex gap-1">
+                          <div className="w-1 h-1 bg-green-500 rounded-full"></div>
+                          <div className="w-1 h-1 bg-green-500 rounded-full opacity-50"></div>
+                          <div className="w-1 h-1 bg-green-500 rounded-full opacity-20"></div>
+                        </div>
+                        <span className="text-[8px] font-mono text-green-500 font-bold uppercase group-hover:translate-x-1 transition-transform">Acessar Oferta →</span>
+                      </div>
+                    </a>
+                  ))}
+                  <button 
+                    onClick={() => setHackedDeals([])}
+                    className="w-full py-2 text-[9px] font-mono text-gray-500 hover:text-red-500 transition-colors"
+                  >
+                    [ LIMPAR_CACHE ]
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                  {personalizedOffers.length > 0 ? (
+                    personalizedOffers.map((item, i) => (
+                      <a 
+                        key={i}
+                        href={`https://www.google.com/search?q=comprar+${item.tag.toLowerCase()}+desconto+promoção&tbm=shop`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 p-3 bg-white border border-gray-100 rounded-2xl hover:shadow-md transition-shadow group relative"
+                      >
+                        <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center relative overflow-hidden">
+                          <ShoppingBag size={18} className="text-gray-300 group-hover:scale-110 transition-transform" />
+                          <div className="absolute top-1 right-1 bg-red-500 w-1.5 h-1.5 rounded-full"></div>
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">{item.type}</p>
+                            <span className="bg-green-100 text-green-700 text-[8px] font-bold px-1.5 py-0.5 rounded-full">-{item.discount}</span>
+                          </div>
+                          <p className="text-xs font-bold text-[#2E0249]">{item.tag}</p>
+                          <p className="text-[10px] font-bold text-green-600">Ver preço com desconto</p>
+                        </div>
+                        <ChevronRight size={16} className="text-gray-300" />
+                      </a>
+                    ))
+                  ) : (
+                    <div className="py-8 flex flex-col items-center text-center px-4">
+                      <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-300 mb-3">
+                        <Box size={24} />
+                      </div>
+                      <p className="text-xs font-bold text-[#2E0249] mb-1">Feed Vazio</p>
+                      <p className="text-[10px] text-gray-500">Gere novos looks para que a IA possa encontrar as melhores ofertas para você!</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+
+            </div>
+            
+            <div className="p-4 bg-gray-50 border-t border-gray-100">
+              <Button onClick={() => setShowFeedModal(false)} className="w-full py-3 text-sm">
+                Fechar Feed
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="w-full h-16 bg-white flex items-center justify-between px-3 md:px-6 sticky top-0 z-50 border-b border-gray-50/50 backdrop-blur-sm bg-white/95">
+        <div className="flex items-center gap-1 md:gap-2">
           {onBack && (
-            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-900 transition-colors active:scale-90">
-              {backIcon === 'x' ? <X size={24} /> : <ArrowLeft size={20} />}
+            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-[#2E0249] transition-colors active:scale-90">
+              {backIcon === 'x' ? <X size={22} /> : <ArrowLeft size={18} />}
             </button>
           )}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 md:gap-2.5">
             <img 
               src="https://i.postimg.cc/G2DYHjrv/P-(1).png" 
               alt="Logo" 
-              className="w-7 h-7 object-contain" 
+              className="w-6 h-6 md:w-7 md:h-7 object-contain" 
             />
-            <span className="text-lg font-semibold text-[#2E0249] tracking-tight font-['Inter']">
+            <span className="text-base md:text-lg font-semibold text-[#2E0249] tracking-tight font-['Inter'] whitespace-nowrap">
               Pandora AI
             </span>
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 md:gap-2">
+          <button 
+            onClick={() => setShowVipGroupModal(true)}
+            className="w-8 h-8 rounded-full bg-white border border-gray-100 text-purple-600 flex items-center justify-center shadow-sm hover:bg-gray-50 transition-colors active:scale-95 relative"
+          >
+            <MessageCircle size={16} />
+            <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
+          </button>
+
           <div 
             onClick={() => setShowCreditsInfo(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border cursor-pointer transition-colors ${badgeConfig.bg} ${badgeConfig.border} ${badgeConfig.text}`}
+            className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-full border cursor-pointer transition-colors ${badgeConfig.bg} ${badgeConfig.border} ${badgeConfig.text}`}
           >
-            <span className="text-xs font-bold">{credits} Créditos</span>
+            <span className="text-xs font-bold">{credits} <span className="hidden sm:inline">Créditos</span></span>
             {badgeConfig.icon}
           </div>
           <button 
@@ -2268,7 +3338,7 @@ const MainLayout: React.FC<{
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto no-scrollbar">
         {showBanner && (
           <div className="px-6">
             <CreditAlertBanner credits={credits} onOpenCredits={onOpenCredits} />
@@ -2277,6 +3347,8 @@ const MainLayout: React.FC<{
         )}
         {children}
       </div>
+
+      <VipGroupModal isOpen={showVipGroupModal} onClose={() => setShowVipGroupModal(false)} />
     </div>
   );
 };
@@ -2347,7 +3419,7 @@ const HomeScreen: React.FC<{
             <button onClick={() => setShowPhotoGuide(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
               <X size={24} />
             </button>
-            <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <h3 className="text-xl font-bold text-[#2E0249] mb-4 flex items-center gap-2">
               <Info className="text-purple-600" /> Guia de Foto Perfeita
             </h3>
             
@@ -2382,12 +3454,12 @@ const HomeScreen: React.FC<{
       )}
 
       <div className="flex-1 overflow-y-auto no-scrollbar pb-6 space-y-6">
-        <div className="px-6 mt-4">
-          <h1 className="text-2xl font-bold text-gray-900 leading-tight">
+        <div className="px-6 mt-2">
+          <h1 className="text-lg font-bold text-[#2E0249] leading-tight">
             Olá, {userName}!
           </h1>
-          <p className="text-sm text-gray-500 mt-1.5 font-light">
-            Experimente novos estilos com inteligência artificial
+          <p className="text-xs text-gray-500 mt-1 font-light">
+            Experimente novos estilos com IA
           </p>
         </div>
 
@@ -2403,7 +3475,7 @@ const HomeScreen: React.FC<{
 
         <div className="px-6 flex flex-col gap-4 mt-2">
           <div className="text-center mb-2">
-            <h2 className="text-2xl font-bold text-gray-900 leading-tight">
+            <h2 className="text-2xl font-bold text-[#2E0249] leading-tight">
               O protagonista é <span className="text-[#6A00F4]">você</span>!
             </h2>
             <p className="text-xs text-gray-500 mt-2 tracking-wide">
@@ -2476,7 +3548,7 @@ const HomeScreen: React.FC<{
                     <Upload className="text-[#6A00F4]" size={28} />
                   </div>
                   <div className="space-y-1 text-center">
-                    <p className="font-bold text-gray-800 text-sm">Começar a Transformação</p>
+                    <p className="font-bold text-[#2E0249] text-sm">Começar a Transformação</p>
                     <p className="text-[10px] text-gray-400">Arraste ou clique para enviar (JPG, PNG, WEBP)</p>
                   </div>
                 </>
@@ -2533,11 +3605,16 @@ const HomeScreen: React.FC<{
   );
 };
 
-const CategoryScreen: React.FC<{ onSelect: (id: string) => void; onBack: () => void }> = ({ onSelect, onBack }) => {
+const CategoryScreen: React.FC<{ onSelect: (id: string) => void; onBack: () => void; isPremium?: boolean; onOpenPremiumModal?: () => void }> = ({ onSelect, onBack, isPremium = false, onOpenPremiumModal }) => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const handleContinue = () => {
     if (selectedCategory) {
+      const category = CATEGORIES.find(c => c.id === selectedCategory);
+      if (category?.badge === 'Premium' && !isPremium) {
+        onOpenPremiumModal?.();
+        return;
+      }
       onSelect(selectedCategory);
     }
   };
@@ -2545,7 +3622,7 @@ const CategoryScreen: React.FC<{ onSelect: (id: string) => void; onBack: () => v
   return (
     <div className="w-full h-full bg-gray-50 flex flex-col animate-fade-in overflow-hidden relative">
       <div className="text-center px-6 py-4 bg-white z-20 shadow-sm shrink-0">
-          <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Escolha o que deseja experimentar</h2>
+          <h2 className="text-xl font-bold text-[#2E0249] leading-relaxed">Escolha o que deseja experimentar</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-4 pb-32">
@@ -2598,8 +3675,9 @@ const FinalizeScreen: React.FC<{
   onBack: () => void;
   loading: boolean;
   isPremium?: boolean;
-}> = ({ category, userImage, onGenerate, onRestart, onBack, loading, isPremium = false }) => {
-  const [clothingImage, setClothingImage] = useState<string | null>(null);
+  initialClothingImage?: string | null;
+}> = ({ category, userImage, onGenerate, onRestart, onBack, loading, isPremium = false, initialClothingImage = null }) => {
+  const [clothingImage, setClothingImage] = useState<string | null>(initialClothingImage);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showGifGuide, setShowGifGuide] = useState(false);
   const [showClothingCheck, setShowClothingCheck] = useState(false);
@@ -2669,13 +3747,13 @@ const FinalizeScreen: React.FC<{
   return (
     <div className="w-full h-full bg-white flex flex-col relative animate-slide-up overflow-hidden">
       <div className="text-center px-6 py-4 bg-white z-20 shadow-sm shrink-0">
-          <h2 className="text-xl font-bold text-gray-900 leading-relaxed">Quase lá!</h2>
+          <h2 className="text-xl font-bold text-[#2E0249] leading-relaxed">Quase lá!</h2>
           <p className="text-gray-500 text-sm">Confira os detalhes antes de gerar</p>
       </div>
 
       <div className="flex-1 px-6 flex flex-col pt-4 overflow-y-auto no-scrollbar">
         <div className="text-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 leading-tight">{texts.title}</h2>
+            <h2 className="text-2xl font-bold text-[#2E0249] leading-tight">{texts.title}</h2>
             <p className="text-sm text-gray-500 mt-2 font-medium">{texts.subtitle}</p>
         </div>
 
@@ -2705,7 +3783,7 @@ const FinalizeScreen: React.FC<{
                 ) : (
                     <>
                         <div className="w-12 h-12 bg-purple-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><Upload className="text-[#6A00F4]" size={24} /></div>
-                        <div className="space-y-1 text-center"><p className="font-medium text-gray-800 text-sm">{texts.placeholder}</p><p className="text-[10px] text-gray-400">Formatos JPG, PNG ou WEBP</p></div>
+                        <div className="space-y-1 text-center"><p className="font-medium text-[#2E0249] text-sm">{texts.placeholder}</p><p className="text-[10px] text-gray-400">Formatos JPG, PNG ou WEBP</p></div>
                     </>
                 )}
              </div>
@@ -2745,7 +3823,7 @@ const FinalizeScreen: React.FC<{
                 <AlertTriangle size={40} className="text-yellow-500" />
               </div>
               
-              <h3 className="text-2xl font-bold text-gray-900 mb-3 leading-tight">
+              <h3 className="text-2xl font-bold text-[#2E0249] mb-3 leading-tight">
                 ⚠️ A foto tem só a peça?
               </h3>
               <p className="text-gray-500 mb-8 text-sm">
@@ -2761,7 +3839,7 @@ const FinalizeScreen: React.FC<{
                 </button>
                 <button 
                   onClick={handleNotOnlyPiece}
-                  className="w-full py-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl font-bold transition-all active:scale-95"
+                  className="w-full py-4 bg-gray-100 hover:bg-gray-200 text-[#2E0249] rounded-2xl font-bold transition-all active:scale-95"
                 >
                   Não
                 </button>
@@ -2777,7 +3855,7 @@ const FinalizeScreen: React.FC<{
               <button onClick={() => setShowGifGuide(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
                 <X size={24} />
               </button>
-              <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <h3 className="text-xl font-bold text-[#2E0249] mb-4 flex items-center gap-2">
                 <Sparkles className="text-purple-600" size={20} /> Guia de Peça Perfeita
               </h3>
               
@@ -2836,14 +3914,17 @@ const FinalizeScreen: React.FC<{
 // --- View 360 Input Screen ---
 const View360Screen: React.FC<{ 
   userImage: string | null; 
-  onGenerate360: (side: string, back: string) => void; 
+  clothingImage: string | null;
+  onGenerate360: (side: string, back: string, clothingBack: string | null) => void; 
   onBack: () => void;
-}> = ({ userImage, onGenerate360, onBack }) => {
+}> = ({ userImage, clothingImage, onGenerate360, onBack }) => {
   const [sideImage, setSideImage] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<string | null>(null);
+  const [clothingBackImage, setClothingBackImage] = useState<string | null>(null);
   
   const sideInputRef = useRef<HTMLInputElement>(null);
   const backInputRef = useRef<HTMLInputElement>(null);
+  const clothingBackInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, setFunc: React.Dispatch<React.SetStateAction<string | null>>) => {
     if (e.target.files && e.target.files[0]) {
@@ -2859,7 +3940,7 @@ const View360Screen: React.FC<{
         <div className="inline-flex items-center gap-2 bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-purple-100">
            <Rotate3d size={14} /> MODO 360°
         </div>
-        <h1 className="text-xl font-bold text-gray-900 leading-tight">
+        <h1 className="text-xl font-bold text-[#2E0249] leading-tight">
            Veja a sua imagem em todos os ângulos
         </h1>
         <p className="text-sm text-gray-500 mt-2">
@@ -2875,7 +3956,7 @@ const View360Screen: React.FC<{
                <img src={userImage || ''} className="w-full h-full object-cover" alt="Frente" />
             </div>
             <div>
-               <p className="font-bold text-gray-800 text-sm">Foto de Frente</p>
+               <p className="font-bold text-[#2E0249] text-sm">Foto de Frente</p>
                <p className="text-xs text-green-600 flex items-center gap-1"><Check size={10} /> Já adicionada</p>
             </div>
          </div>
@@ -2893,35 +3974,56 @@ const View360Screen: React.FC<{
                 </div>
              )}
              <div>
-                <p className="font-bold text-gray-800 text-sm">Foto de Lado</p>
+                <p className="font-bold text-[#2E0249] text-sm">Foto de Lado</p>
                 <p className="text-xs text-gray-400">{sideImage ? 'Clique para alterar' : 'Toque para adicionar'}</p>
              </div>
          </div>
 
-         {/* Upload Costas */}
-         <div onClick={() => backInputRef.current?.click()} className="border-2 border-dashed border-gray-200 bg-white rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-purple-50 transition-colors h-24">
-             <input type="file" ref={backInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setBackImage)} />
-             {backImage ? (
-                <div className="w-16 h-16 rounded-xl overflow-hidden bg-white shadow-sm flex-shrink-0 border-2 border-purple-200">
-                   <img src={backImage} className="w-full h-full object-cover" alt="Costas" />
-                </div>
-             ) : (
-                <div className="w-16 h-16 rounded-xl bg-purple-50 flex items-center justify-center flex-shrink-0 text-purple-400">
-                   <Upload size={24} />
-                </div>
-             )}
-             <div>
-                <p className="font-bold text-gray-800 text-sm">Foto de Costas</p>
-                <p className="text-xs text-gray-400">{backImage ? 'Clique para alterar' : 'Toque para adicionar'}</p>
+          {/* Upload Costas */}
+          <div className="space-y-3">
+             <div onClick={() => backInputRef.current?.click()} className="border-2 border-dashed border-gray-200 bg-white rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-purple-50 transition-colors h-24">
+                 <input type="file" ref={backInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setBackImage)} />
+                 {backImage ? (
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white shadow-sm flex-shrink-0 border-2 border-purple-200">
+                       <img src={backImage} className="w-full h-full object-cover" alt="Costas" />
+                    </div>
+                 ) : (
+                    <div className="w-16 h-16 rounded-xl bg-purple-50 flex items-center justify-center flex-shrink-0 text-purple-400">
+                       <Upload size={24} />
+                    </div>
+                 )}
+                 <div>
+                    <p className="font-bold text-[#2E0249] text-sm">Foto de Costas (Sua)</p>
+                    <p className="text-xs text-gray-400">{backImage ? 'Clique para alterar' : 'Toque para adicionar'}</p>
+                 </div>
              </div>
-         </div>
+
+             {backImage && (
+               <div onClick={() => clothingBackInputRef.current?.click()} className="border-2 border-dashed border-purple-200 bg-purple-50/30 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-purple-100 transition-colors h-24 animate-in fade-in slide-in-from-top-2">
+                   <input type="file" ref={clothingBackInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setClothingBackImage)} />
+                   {clothingBackImage ? (
+                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-white shadow-sm flex-shrink-0 border-2 border-purple-400">
+                         <img src={clothingBackImage} className="w-full h-full object-cover" alt="Peça Costas" />
+                      </div>
+                   ) : (
+                      <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center flex-shrink-0 text-purple-500 shadow-sm">
+                         <ImageIcon size={24} />
+                      </div>
+                   )}
+                   <div>
+                      <p className="font-bold text-purple-900 text-sm">Veste de Costas (Peça)</p>
+                      <p className="text-xs text-purple-400">{clothingBackImage ? 'Clique para alterar' : 'Opcional: Adicione a foto da peça de costas'}</p>
+                   </div>
+               </div>
+             )}
+          </div>
       </div>
 
       <div className="p-8 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] w-full sticky bottom-0 z-30">
         <Button 
            variant="primary" 
            disabled={!isReady} 
-           onClick={() => isReady && onGenerate360(sideImage!, backImage!)}
+           onClick={() => isReady && onGenerate360(sideImage!, backImage!, clothingBackImage)}
            className={!isReady ? 'opacity-50 grayscale' : ''}
         >
             Gerar 360
@@ -3197,7 +4299,7 @@ const Result360ImageItem: React.FC<{
 
       <div 
         ref={containerRef}
-        className={`relative w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-lg border-4 border-[#6A00F4] bg-[#6A00F4]/5 cursor-pointer touch-none`}
+        className={`relative w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-lg border-4 border-[#6A00F4] bg-[#6A00F4]/5 cursor-pointer touch-none transition-all duration-300`}
         style={aspectRatio === 'original' && naturalAspectRatio ? { aspectRatio: naturalAspectRatio } : {}}
       >
         <div 
@@ -3236,82 +4338,90 @@ const Result360Screen: React.FC<{
   onRestart: () => void;
   onBack: () => void;
   userState: UserState;
+  onOpenPremiumModal?: () => void;
   aspectRatio: 'original' | '9/16' | '1/1' | '4/5';
   setAspectRatio: (ratio: 'original' | '9/16' | '1/1' | '4/5') => void;
-}> = ({ images, onRestart, onBack, userState, aspectRatio, setAspectRatio }) => {
-  const isPremiumUser = userState.lastPlan === 'Premium' || userState.lastPlan === 'premium' || userState.lastPlan === '30';
+}> = ({ images, onRestart, onBack, userState, onOpenPremiumModal, aspectRatio, setAspectRatio }) => {
+  const isPremiumUser = userState.subscriptionTier === 'premium' || 
+                        (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
+                        (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
 
   const handleDownloadAll = async () => {
     if (!images) return;
-    alert('Iniciando download das 3 imagens...');
     
     for (let i = 0; i < images.length; i++) {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = images[i];
-      await new Promise((resolve) => {
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
+      try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = images[i];
+        await new Promise((resolve, reject) => {
+          img.onerror = reject;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(null);
+              return;
+            }
+
+            let targetWidth = 1080;
+            let targetHeight;
+
+            if (aspectRatio === 'original') {
+              targetWidth = img.naturalWidth;
+              targetHeight = img.naturalHeight;
+            } else if (aspectRatio === '9/16') {
+              targetHeight = (targetWidth * 16) / 9;
+            } else if (aspectRatio === '1/1') {
+              targetHeight = targetWidth;
+            } else if (aspectRatio === '4/5') {
+              targetHeight = (targetWidth * 5) / 4;
+            } else {
+              targetHeight = (targetWidth * 4) / 3;
+            }
+
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            const imgAspectRatio = img.naturalWidth / img.naturalHeight;
+            const canvasAspectRatio = canvas.width / canvas.height;
+            
+            let drawWidth, drawHeight;
+            if (imgAspectRatio > canvasAspectRatio) {
+              drawHeight = canvas.height;
+              drawWidth = canvas.height * imgAspectRatio;
+            } else {
+              drawWidth = canvas.width;
+              drawHeight = canvas.width / imgAspectRatio;
+            }
+
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+            ctx.restore();
+
+            // Watermark
+            ctx.font = `bold ${Math.max(20, canvas.width * 0.02)}px Inter, sans-serif`;
+            ctx.fillStyle = "rgba(106, 0, 244, 0.8)";
+            ctx.textAlign = "right";
+            ctx.fillText("PANDORA AI", canvas.width - (canvas.width * 0.02), canvas.height - (canvas.height * 0.02));
+
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL('image/png');
+            const labels = ['Frente', 'Lateral', 'Costas'];
+            link.download = `pandora-360-${labels[i].toLowerCase()}-${aspectRatio.replace('/', '-')}-${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             resolve(null);
-            return;
-          }
-
-          let targetWidth = 1080;
-          let targetHeight;
-
-          if (aspectRatio === 'original') {
-            targetWidth = img.naturalWidth;
-            targetHeight = img.naturalHeight;
-          } else if (aspectRatio === '9/16') {
-            targetHeight = (targetWidth * 16) / 9;
-          } else if (aspectRatio === '1/1') {
-            targetHeight = targetWidth;
-          } else if (aspectRatio === '4/5') {
-            targetHeight = (targetWidth * 5) / 4;
-          } else {
-            targetHeight = (targetWidth * 4) / 3;
-          }
-
-          canvas.width = targetWidth;
-          canvas.height = targetHeight;
-
-          const imgAspectRatio = img.naturalWidth / img.naturalHeight;
-          const canvasAspectRatio = canvas.width / canvas.height;
-          
-          let drawWidth, drawHeight;
-          if (imgAspectRatio > canvasAspectRatio) {
-            drawHeight = canvas.height;
-            drawWidth = canvas.height * imgAspectRatio;
-          } else {
-            drawWidth = canvas.width;
-            drawHeight = canvas.width / imgAspectRatio;
-          }
-
-          ctx.save();
-          ctx.translate(canvas.width / 2, canvas.height / 2);
-          ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-          ctx.restore();
-
-          // Watermark
-          ctx.font = `bold ${Math.max(20, canvas.width * 0.02)}px Inter, sans-serif`;
-          ctx.fillStyle = "rgba(106, 0, 244, 0.8)";
-          ctx.textAlign = "right";
-          ctx.fillText("PANDORA AI", canvas.width - (canvas.width * 0.02), canvas.height - (canvas.height * 0.02));
-
-          const link = document.createElement('a');
-          link.href = canvas.toDataURL('image/png');
-          const labels = ['Frente', 'Lateral', 'Costas'];
-          link.download = `pandora-360-${labels[i].toLowerCase()}-${aspectRatio.replace('/', '-')}.png`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          resolve(null);
-        };
-      });
-      // Small delay between downloads
-      await new Promise(r => setTimeout(r, 500));
+          };
+        });
+        // Small delay between downloads
+        await new Promise(r => setTimeout(r, 500));
+      } catch (err) {
+        console.error('Erro ao baixar imagem 360:', err);
+        window.open(images[i], '_blank');
+      }
     }
   };
 
@@ -3324,7 +4434,7 @@ const Result360Screen: React.FC<{
           <button 
             onClick={() => {
               if (!isPremiumUser) {
-                alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                onOpenPremiumModal?.();
                 return;
               }
               setAspectRatio('4/5');
@@ -3336,7 +4446,7 @@ const Result360Screen: React.FC<{
           <button 
             onClick={() => {
               if (!isPremiumUser) {
-                alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                onOpenPremiumModal?.();
                 return;
               }
               setAspectRatio('9/16');
@@ -3348,7 +4458,7 @@ const Result360Screen: React.FC<{
           <button 
             onClick={() => {
               if (!isPremiumUser) {
-                alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                onOpenPremiumModal?.();
                 return;
               }
               setAspectRatio('1/1');
@@ -3403,34 +4513,35 @@ const Result360Screen: React.FC<{
       {/* Bottom Actions */}
       <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-white via-white to-transparent pt-10 z-20">
         <div className="max-w-md mx-auto flex flex-col gap-3">
-          <button 
+          <Button 
             onClick={handleDownloadAll}
-            className="w-full py-4 bg-[#6A00F4] text-white rounded-2xl font-black text-sm flex items-center justify-center gap-3 shadow-xl shadow-purple-200 active:scale-95 transition-all"
+            variant="primary"
           >
-            <Download size={20} /> BAIXAR TODAS AS FOTOS
-          </button>
+            <Download size={20} /> Baixar Todas as Fotos
+          </Button>
 
           <div className="grid grid-cols-2 gap-3">
             <button 
               onClick={() => compartilharWhatsApp()} 
-              className="py-3.5 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+              className="py-3 px-6 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-full font-bold text-base flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
             >
               <MessageCircle size={18} /> WhatsApp
             </button>
             <button 
               onClick={() => compartilharInstagram()} 
-              className="py-3.5 bg-gradient-to-tr from-[#f09433] via-[#e6683c] to-[#bc1888] text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+              className="py-3 px-6 bg-gradient-to-tr from-[#f09433] via-[#e6683c] to-[#bc1888] text-white rounded-full font-bold text-base flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
             >
               <Instagram size={18} /> Instagram
             </button>
           </div>
           
-          <button 
+          <Button 
             onClick={onRestart}
-            className="w-full py-4 bg-white text-gray-500 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 border-2 border-gray-100 active:scale-95 transition-all"
+            variant="outline"
+            className="border-purple-200 text-purple-700 hover:bg-purple-50"
           >
-            <Home size={18} /> Voltar ao Início
-          </button>
+            <RefreshCcw size={18} /> Trocar peça
+          </Button>
         </div>
       </div>
     </div>
@@ -3444,10 +4555,12 @@ const ResultScreen: React.FC<{
   onRestart: () => void;
   onView360: () => void;
   onBack: () => void;
+  onOpenPremiumModal?: () => void;
+  onOpenCheckout?: (url: string) => void;
   userState: UserState;
   aspectRatio: 'original' | '9/16' | '1/1' | '4/5';
   setAspectRatio: (ratio: 'original' | '9/16' | '1/1' | '4/5') => void;
-}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, userState, aspectRatio, setAspectRatio }) => {
+}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, onOpenPremiumModal, onOpenCheckout, userState, aspectRatio, setAspectRatio }) => {
   const [showImageModal, setShowImageModal] = useState<string | null>(null);
   const [showTapHint, setShowTapHint] = useState(() => {
     return localStorage.getItem('result_hint_visto') !== 'true';
@@ -3462,7 +4575,9 @@ const ResultScreen: React.FC<{
   const containerRef = useRef<HTMLDivElement>(null);
   const [show360Modal, setShow360Modal] = useState(false);
 
-  const isPremiumUser = userState.lastPlan === 'Premium' || userState.lastPlan === 'premium' || userState.lastPlan === '30';
+  const isPremiumUser = userState.subscriptionTier === 'premium' || 
+                        (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
+                        (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
 
   const [activeAngleIndex, setActiveAngleIndex] = useState(0); // 0: Front, 1: Side, 2: Back
   const has360Images = userState.generated360Images && userState.generated360Images.length >= 3;
@@ -3555,81 +4670,87 @@ const ResultScreen: React.FC<{
   const handleDownload = async () => {
     if (!currentImage || !containerRef.current) return;
 
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = currentImage;
-    
-    await new Promise((resolve) => {
-        img.onload = resolve;
-    });
+    try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = currentImage;
+        
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
 
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
 
-    let targetWidth, targetHeight;
+        let targetWidth, targetHeight;
 
-    if (aspectRatio === 'original') {
-        targetWidth = img.naturalWidth;
-        targetHeight = img.naturalHeight;
-    } else {
-        targetWidth = 1080;
-        if (aspectRatio === '9/16') {
-            targetHeight = (targetWidth * 16) / 9;
-        } else if (aspectRatio === '1/1') {
-            targetHeight = targetWidth;
-        } else if (aspectRatio === '4/5') {
-            targetHeight = (targetWidth * 5) / 4;
+        if (aspectRatio === 'original') {
+            targetWidth = img.naturalWidth;
+            targetHeight = img.naturalHeight;
         } else {
-            targetHeight = (targetWidth * 4) / 3;
+            targetWidth = 1080;
+            if (aspectRatio === '9/16') {
+                targetHeight = (targetWidth * 16) / 9;
+            } else if (aspectRatio === '1/1') {
+                targetHeight = targetWidth;
+            } else if (aspectRatio === '4/5') {
+                targetHeight = (targetWidth * 5) / 4;
+            } else {
+                targetHeight = (targetWidth * 4) / 3;
+            }
         }
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+
+        // Calculate scaling to fill image into canvas (cover)
+        const imgAspectRatio = img.naturalWidth / img.naturalHeight;
+        const canvasAspectRatio = canvas.width / canvas.height;
+        
+        let drawWidth, drawHeight;
+        
+        if (imgAspectRatio > canvasAspectRatio) {
+            drawHeight = canvas.height;
+            drawWidth = canvas.height * imgAspectRatio;
+        } else {
+            drawWidth = canvas.width;
+            drawHeight = canvas.width / imgAspectRatio;
+        }
+
+        // Apply transformations
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.scale(zoomLevel, zoomLevel);
+        
+        // Map pan (pixels in UI) to canvas pixels. 
+        const containerWidth = containerRef.current.clientWidth;
+        const containerHeight = containerRef.current.clientHeight;
+        const panScaleX = canvas.width / containerWidth; 
+        const panScaleY = canvas.height / containerHeight;
+        ctx.translate(pan.x * panScaleX, pan.y * panScaleY);
+        
+        ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+        ctx.restore();
+
+        // Add Watermark
+        ctx.font = `bold ${Math.max(20, canvas.width * 0.02)}px Inter, sans-serif`;
+        ctx.fillStyle = "rgba(106, 0, 244, 0.8)"; // Purple
+        ctx.textAlign = "right";
+        ctx.fillText("PANDORA AI", canvas.width - (canvas.width * 0.02), canvas.height - (canvas.height * 0.02));
+
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        const angleLabel = has360Images ? ['frente', 'lado', 'costas'][activeAngleIndex] : 'look';
+        link.download = `pandora-${angleLabel}-${aspectRatio.replace('/', '-')}-${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (err) {
+        console.error('Erro ao baixar imagem:', err);
+        window.open(currentImage, '_blank');
     }
-
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-
-    // Calculate scaling to fill image into canvas (cover)
-    const imgAspectRatio = img.naturalWidth / img.naturalHeight;
-    const canvasAspectRatio = canvas.width / canvas.height;
-    
-    let drawWidth, drawHeight;
-    
-    if (imgAspectRatio > canvasAspectRatio) {
-        drawHeight = canvas.height;
-        drawWidth = canvas.height * imgAspectRatio;
-    } else {
-        drawWidth = canvas.width;
-        drawHeight = canvas.width / imgAspectRatio;
-    }
-
-    // Apply transformations
-    ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.scale(zoomLevel, zoomLevel);
-    
-    // Map pan (pixels in UI) to canvas pixels. 
-    const containerWidth = containerRef.current.clientWidth;
-    const containerHeight = containerRef.current.clientHeight;
-    const panScaleX = canvas.width / containerWidth; 
-    const panScaleY = canvas.height / containerHeight;
-    ctx.translate(pan.x * panScaleX, pan.y * panScaleY);
-    
-    ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-    ctx.restore();
-
-    // Add Watermark
-    ctx.font = `bold ${Math.max(20, canvas.width * 0.02)}px Inter, sans-serif`;
-    ctx.fillStyle = "rgba(106, 0, 244, 0.8)"; // Purple
-    ctx.textAlign = "right";
-    ctx.fillText("PANDORA AI", canvas.width - (canvas.width * 0.02), canvas.height - (canvas.height * 0.02));
-
-    const link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    const angleLabel = has360Images ? ['frente', 'lado', 'costas'][activeAngleIndex] : 'look';
-    link.download = `pandora-${angleLabel}-${aspectRatio.replace('/', '-')}-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   return (
@@ -3727,40 +4848,40 @@ const ResultScreen: React.FC<{
             
             {/* Aspect Ratio Controls */}
             <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
-                <button onClick={() => setAspectRatio('original')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === 'original' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Original</button>
+                <button onClick={() => setAspectRatio('original')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === 'original' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-[#2E0249]'}`}>Original</button>
                 <button 
                   onClick={() => {
                     if (!isPremiumUser) {
-                      alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                      onOpenPremiumModal?.();
                       return;
                     }
                     setAspectRatio('4/5');
                   }} 
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-[#2E0249]'}`}
                 >
                   Instagram {!isPremiumUser && '🔒'}
                 </button>
                 <button 
                   onClick={() => {
                     if (!isPremiumUser) {
-                      alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                      onOpenPremiumModal?.();
                       return;
                     }
                     setAspectRatio('9/16');
                   }} 
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-[#2E0249]'}`}
                 >
                   Storys {!isPremiumUser && '🔒'}
                 </button>
                 <button 
                   onClick={() => {
                     if (!isPremiumUser) {
-                      alert('🔒 Disponível apenas no Plano Premium!\n\nAcesse por R$29,90 e baixe em todos os formatos:\nInstagram, Stories e Square.');
+                      onOpenPremiumModal?.();
                       return;
                     }
                     setAspectRatio('1/1');
                   }} 
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '1/1' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '1/1' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-[#2E0249]'}`}
                 >
                   Square {!isPremiumUser && '🔒'}
                 </button>
@@ -3843,19 +4964,43 @@ const ResultScreen: React.FC<{
 
 
                 {/* Badges on Image */}
-                <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold text-purple-600 shadow-sm flex items-center gap-1 z-20">
+                <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold text-purple-600 shadow-sm flex items-center gap-1 z-20 whitespace-nowrap">
                     PANDORA AI <Sparkles size={10} />
                 </div>
                 
                 {isPremiumUser && (
                   <button 
                       onClick={handleVeja360}
-                      className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-md px-4 py-2 rounded-full text-xs font-bold text-gray-900 shadow-sm flex items-center gap-2 hover:bg-white transition-colors active:scale-95 transform hover:scale-105 z-20"
+                      className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-md px-4 py-2 rounded-full text-xs font-bold text-[#2E0249] shadow-sm flex items-center gap-2 hover:bg-white transition-colors active:scale-95 transform hover:scale-105 z-20"
                   >
                       <Rotate3d size={14} /> Veja 360
                   </button>
                 )}
             </div>
+
+            {/* Elogio da Estilista IA */}
+            {userState.lastCompliment && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full bg-purple-50 border border-purple-100 rounded-2xl p-4 relative overflow-hidden"
+              >
+                <div className="absolute -top-1 -right-1 opacity-10">
+                  <Sparkles size={60} className="text-purple-600" />
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0 mt-0.5 shadow-lg shadow-purple-200">
+                    <Sparkles size={16} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">Elogio da Estilista</p>
+                    <p className="text-purple-900 text-sm font-medium leading-relaxed italic">
+                      "{userState.lastCompliment}"
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
 
             {/* Input Images Row */}
@@ -3919,7 +5064,7 @@ const ResultScreen: React.FC<{
               {/* Título */}
               <div className="text-center mb-4">
                 <div className="text-[32px] mb-2">🔄</div>
-                <h3 className="text-xl font-bold text-gray-900 mb-1.5">
+                <h3 className="text-xl font-bold text-[#2E0249] mb-1.5">
                   Veja seu Look em 360°!
                 </h3>
                 <p className="text-[13px] text-gray-500 leading-relaxed">
@@ -3982,10 +5127,7 @@ const ResultScreen: React.FC<{
               {/* Botão Premium */}
               <button
                 onClick={() => {
-                  window.open(
-                    'https://pay.cakto.com.br/wsopww7_808505',
-                    '_blank'
-                  );
+                  onOpenCheckout?.('https://pay.cakto.com.br/wsopww7_808505?');
                   setShow360Modal(false);
                 }}
                 className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2 shadow-lg shadow-purple-200 active:scale-95 transition-transform mb-2.5"
@@ -4126,7 +5268,7 @@ const CadastroScreen: React.FC<{
           <button 
             onClick={onGoogleLogin}
             disabled={isLoading}
-            className="w-full py-3 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
+            className="w-full py-3 px-6 rounded-2xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-3 text-base shadow-sm border border-gray-200 bg-white text-[#2E0249] hover:bg-gray-50 disabled:opacity-70 disabled:cursor-not-allowed"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path
@@ -4166,9 +5308,63 @@ const CadastroScreen: React.FC<{
   );
 };
 
+// --- Closet Screen ---
+const ClosetScreen: React.FC<{ 
+  history: HistoryItem[]; 
+  onReuse: (item: HistoryItem) => void 
+}> = ({ history, onReuse }) => {
+  return (
+    <div className="p-6 space-y-6 animate-fade-in">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-2xl font-black text-[#2E0249] tracking-tight">MEU CLOSET</h2>
+        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{history.length} Looks salvos</p>
+      </div>
+
+      {history.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+          <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-gray-300">
+            <Box size={40} />
+          </div>
+          <p className="text-gray-400 text-sm font-medium">Seu closet está vazio.<br/>Crie seu primeiro look!</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          {history.map((item) => (
+            <div key={item.id} className="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-all group">
+              <div className="aspect-[3/4] relative overflow-hidden">
+                <img 
+                  src={item.generatedImage} 
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                  alt="Look"
+                  referrerPolicy="no-referrer"
+                />
+                <button 
+                  onClick={() => onReuse(item)}
+                  className="absolute top-3 right-3 w-8 h-8 bg-white/80 backdrop-blur-md rounded-full flex items-center justify-center text-purple-600 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <RefreshCw size={16} />
+                </button>
+              </div>
+              <div className="p-3">
+                <p className="text-[10px] text-gray-400 font-bold uppercase truncate">
+                  {new Date(item.date).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- Jornada Screen - Removed ---
+
 const App: React.FC = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [showAvaliacaoModal, setShowAvaliacaoModal] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [urlPublicaImagem, setUrlPublicaImagem] = useState<string>('');
   const [notaAvaliacao, setNotaAvaliacao] = useState(0);
   const [comentarioAvaliacao, setComentarioAvaliacao] = useState('');
@@ -4176,6 +5372,7 @@ const App: React.FC = () => {
   const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
+  const [is360Loading, setIs360Loading] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const [email, setEmail] = useState('');
 
@@ -4191,6 +5388,9 @@ const App: React.FC = () => {
   const [confirmarNovaSenhaRedefinir, setConfirmarNovaSenhaRedefinir] = useState('');
   const [isFirstLogin, setIsFirstLogin] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<'original' | '9/16' | '1/1' | '4/5'>('original');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const [userState, setUserState] = useState<UserState>({
     email: '',
@@ -4203,94 +5403,250 @@ const App: React.FC = () => {
     backImage: null,
     selectedCategory: null,
     clothingImage: null,
+    clothingBackImage: null,
     generatedImage: null,
     generated360Images: null,
     credits: 0,
     history: [],
+    streak: 0,
+    styleProfile: null,
+    styleTags: [],
     lastPlan: null,
     lastPurchaseAmount: null,
     lastPurchaseCredits: null,
-    lastPurchaseDate: null
+    lastPurchaseDate: null,
+    subscriptionTier: 'basic',
+    subscriptionExpiresAt: null,
+    subscriptionStartDate: null,
+    creditsReleased: 0,
+    totalPhotosGenerated: 0,
+    dailyUsage: null,
+    lastRouletteSpin: null,
+    rechargeCount: 0,
+    badge: null,
+    pendingCredits: 0
   });
 
+  const isInitialLoadRef = useRef(true);
+
+  // Preload GIF Guia de Peça
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const img = new Image();
+    img.src = "https://i.postimg.cc/yxjyGXLW/202603181804-ezgif-com-video-to-gif-converter.gif";
+  }, []);
+
+  useEffect(() => {
+    console.log('📱 App State - Screen:', screen);
+    console.log('💰 App State - Credits:', userState.credits);
+  }, [screen, userState.credits]);
+
+  useEffect(() => {
+    let userUnsubscribe: (() => void) | null = null;
+
+    const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('🔐 Auth State Changed:', user ? `User: ${user.email} (UID: ${user.uid})` : 'No user');
       if (user && user.email) {
         const userEmail = user.email.toLowerCase().trim();
         setUserId(user.uid);
+        setIsAdmin(userEmail === 'pandoravesteai@gmail.com');
 
-        try {
-          const userRef = doc(db, 'users', user.uid);
-          const userSnap = await getDoc(userRef);
+        // Listener em tempo real para os dados do usuário
+        if (userUnsubscribe) userUnsubscribe();
+        
+        migrateOrphanedData(true);
 
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            const plan = userData.lastPurchasePlan || 'basic';
-            setUserState(prev => ({
-              ...prev,
-              email: userEmail,
-              credits: userData.credits ?? 0,
-              name: userData.nome || userData.name || '',
-              lastPlan: plan,
-            }));
-
-            setTimeout(async () => {
-              if (user.uid) {
-                await requestNotificationPermission(user.uid);
-              }
-            }, 3000);
-
-            // Carrega histórico do Firestore
-            try {
-              const { getDocs, collection, orderBy, query, limit } = 
-                await import('firebase/firestore');
-              
-              const historyRef = collection(db, 'users', user.uid, 'history');
-              const q = query(historyRef, orderBy('date', 'desc'), limit(50));
-              const snapshot = await getDocs(q);
-              
-              const history: HistoryItem[] = snapshot.docs.map(doc => ({
-                id: doc.data().id,
-                date: doc.data().date,
-                generatedImage: doc.data().generatedImage,
-                userImage: doc.data().userImage,
-                clothingImage: doc.data().clothingImage,
-                type: doc.data().type,
-                prompt: doc.data().prompt || '',
-              }));
-              
-              setUserState(prev => ({
-                ...prev,
-                history
-              }));
-              
-              console.log(`✅ ${history.length} itens do histórico carregados`);
-            } catch (error) {
-              console.error('Erro ao carregar histórico:', error);
-            }
-
-            // Só redireciona se estiver na tela de login ou splash
-            setScreen(prev => 
-              prev === Screen.SPLASH || prev === Screen.LOGIN 
-                ? Screen.ONBOARDING 
-                : prev
-            );
-
-            const jaViuGuia = localStorage.getItem(`guia_visto_${user.uid}`);
-            if (!jaViuGuia) {
-              setIsFirstLogin(true);
+        userUnsubscribe = listenToUser(user.uid, async (userData) => {
+          console.log('🔄 Firestore Update Received for UID:', user.uid);
+          console.log('📄 Raw Firestore Data:', JSON.stringify(userData));
+          
+          let plan = userData.lastPurchasePlan || userData.lastPlan || null;
+          const purchaseAmount = Number(userData.lastPurchaseAmount);
+          
+          if (!plan) {
+            if (purchaseAmount === 29.9 || purchaseAmount === 29.90 || purchaseAmount === 30) {
+              plan = 'Premium (R$ 29,90)';
+            } else if (purchaseAmount === 19.9 || purchaseAmount === 19.90 || purchaseAmount === 20) {
+              plan = 'Básico (R$ 19,90)';
             }
           }
+
+          const isPremium = userData.subscriptionTier === 'premium' || 
+                            (plan && (plan.toLowerCase().includes('premium') || plan.includes('29,90') || plan.includes('29.90') || plan.includes('30')));
+
+          setUserState(prev => {
+            const newState = {
+              ...prev,
+              email: userEmail,
+              credits: Number(userData.credits ?? userData.exp ?? 0),
+              name: userData.nome || userData.name || '',
+              lastPlan: plan,
+              lastPurchaseAmount: userData.lastPurchaseAmount || null,
+              lastPurchaseCredits: userData.lastPurchaseCredits || null,
+              lastPurchaseDate: userData.lastPurchase || userData.lastPurchaseDate || null,
+              subscriptionTier: isPremium ? 'premium' : (userData.subscriptionTier || 'basic'),
+              subscriptionExpiresAt: userData.subscriptionExpiresAt || null,
+              subscriptionStartDate: userData.subscriptionStartDate || null,
+              creditsReleased: userData.creditsReleased || 0,
+              totalPhotosGenerated: userData.totalPhotosGenerated || 0,
+              dailyUsage: userData.dailyUsage || null,
+              lastRouletteSpin: userData.lastRouletteSpin || null,
+              rechargeCount: userData.rechargeCount || 0,
+              badge: userData.badge || null,
+              pendingCredits: userData.pendingCredits || 0,
+              streak: userData.streak ?? 0,
+              styleProfile: userData.styleProfile ?? null,
+              styleTags: userData.styleTags ?? [],
+              lastLogin: userData.lastLogin ?? '',
+            };
+            console.log('✅ UserState Updated with Credits:', newState.credits);
+            return newState;
+          });
+
+          // Lógica de Streak (Ofensiva Diária) - Executa apenas uma vez por login ou quando o dia muda
+          const today = new Date().toISOString().split('T')[0];
+          const lastLoginDate = userData.lastLogin ? userData.lastLogin.split('T')[0] : null;
+
+          if (lastLoginDate !== today) {
+            let newStreak = (userData.streak ?? 0);
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+            if (lastLoginDate === yesterdayStr) {
+              newStreak += 1;
+            } else {
+              newStreak = 1;
+            }
+
+            const userRef = doc(db, 'users', user.uid);
+            await updateDoc(userRef, { 
+              streak: newStreak, 
+              lastLogin: today 
+            });
+          }
+
+          // Verificação de Expiração de Assinatura Premium
+          if (userData.subscriptionTier === 'premium' && userData.subscriptionExpiresAt) {
+            const expiryDate = new Date(userData.subscriptionExpiresAt);
+            const now = new Date();
+            
+            if (now > expiryDate) {
+              const userRef = doc(db, 'users', user.uid);
+              await updateDoc(userRef, {
+                subscriptionTier: 'basic'
+              });
+              console.log('⚠️ Assinatura Premium expirada. Retornando ao plano básico.');
+            }
+          }
+
+          // Processa liberação de créditos pendentes
+          await processCreditRelease(user.uid);
+
+          // Só redireciona se estiver na tela de login ou splash e for a primeira carga
+          if (isInitialLoadRef.current) {
+            setScreen(prev => {
+              if (prev === Screen.SPLASH || prev === Screen.LOGIN) {
+                return Screen.MAIN;
+              }
+              return prev;
+            });
+            isInitialLoadRef.current = false;
+          }
+        });
+
+        // Carrega histórico do Firestore (uma vez por login)
+        try {
+          const { getDocs, collection, orderBy, query, limit } = 
+            await import('firebase/firestore');
+          
+          const historyRef = collection(db, 'users', user.uid, 'history');
+          const q = query(historyRef, orderBy('date', 'desc'), limit(50));
+          const snapshot = await getDocs(q);
+          
+          const history: HistoryItem[] = snapshot.docs.map(doc => ({
+            id: doc.data().id,
+            date: doc.data().date,
+            generatedImage: doc.data().generatedImage,
+            userImage: doc.data().userImage,
+            clothingImage: doc.data().clothingImage,
+            type: doc.data().type,
+            prompt: doc.data().prompt || '',
+            stylistTip: doc.data().stylistTip || '',
+          }));
+          
+          setUserState(prev => ({
+            ...prev,
+            history
+          }));
+          
+          console.log(`✅ ${history.length} itens do histórico carregados`);
         } catch (error) {
-          console.error('Erro ao recuperar sessão:', error);
+          console.error('Erro ao carregar histórico:', error);
         }
+
+        // Só redireciona se estiver na tela de login ou splash
+        // setScreen movido para dentro do listenToUser
+
+        const jaViuGuia = localStorage.getItem(`guia_visto_${user.uid}`);
+        if (!jaViuGuia) {
+          setIsFirstLogin(true);
+        }
+
+        setTimeout(async () => {
+          if (user.uid) {
+            await requestNotificationPermission(user.uid);
+          }
+        }, 3000);
+
       } else {
         // usuário deslogado
         setUserId('');
+        setUserState({
+          email: '',
+          name: '',
+          cellphone: '',
+          taxId: '',
+          profileImage: null,
+          uploadedImage: null,
+          sideImage: null,
+          backImage: null,
+          selectedCategory: null,
+          clothingImage: null,
+          clothingBackImage: null,
+          generatedImage: null,
+          generated360Images: null,
+          credits: 0,
+          history: [],
+          streak: 0,
+          styleProfile: null,
+          styleTags: [],
+          lastPlan: null,
+          lastPurchaseAmount: null,
+          lastPurchaseCredits: null,
+          lastPurchaseDate: null,
+          subscriptionTier: 'basic',
+          subscriptionExpiresAt: null,
+          subscriptionStartDate: null,
+          creditsReleased: 0,
+          totalPhotosGenerated: 0,
+          dailyUsage: null,
+          lastRouletteSpin: null,
+          rechargeCount: 0,
+          badge: null,
+          pendingCredits: 0
+        });
+        isInitialLoadRef.current = true;
+        if (userUnsubscribe) {
+          userUnsubscribe();
+          userUnsubscribe = null;
+        }
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      authUnsubscribe();
+      if (userUnsubscribe) userUnsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -4302,12 +5658,23 @@ const App: React.FC = () => {
     const payment = urlParams.get('payment');
     const paidUserId = urlParams.get('userId');
     const credits = parseInt(urlParams.get('credits') || '0');
+    const amount = parseFloat(urlParams.get('amount') || '0');
     
     if (payment === 'success' && paidUserId && credits > 0) {
-      addCredits(paidUserId, credits).then(() => {
-        window.history.replaceState({}, '', '/');
-        alert(`✅ ${credits} créditos adicionados!`);
-      });
+      // Se o valor for 29.90, ativa o premium por 30 dias
+      if (amount === 29.9 || amount === 29.90) {
+        purchasePremium(paidUserId).then(() => {
+          addCredits(paidUserId, credits).then(() => {
+            window.history.replaceState({}, '', '/');
+            alert(`✅ Plano Premium Ativado! ${credits} créditos adicionados.`);
+          });
+        });
+      } else {
+        addCredits(paidUserId, credits).then(() => {
+          window.history.replaceState({}, '', '/');
+          alert(`✅ ${credits} créditos adicionados!`);
+        });
+      }
     }
 
     // Detecta se a URL tem parâmetros de reset de senha
@@ -4325,7 +5692,9 @@ const App: React.FC = () => {
   }, []);
 
 
-  const isPremiumUser = userState.lastPlan === 'Premium' || userState.lastPlan === 'premium' || userState.lastPlan === '30';
+  const isPremiumUser = userState.subscriptionTier === 'premium' || 
+                        (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
+                        (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
 
   const getUserName = () => {
     if (userState.name) return userState.name;
@@ -4333,23 +5702,6 @@ const App: React.FC = () => {
     const namePart = userState.email.split('@')[0];
     return namePart.charAt(0).toUpperCase() + namePart.slice(1);
   };
-
-
-  useEffect(() => {
-    if (!userId) return;
-    const unsubscribe = listenToUser(userId, (data) => {
-      setUserState(prev => ({ 
-        ...prev, 
-        credits: data.credits || 0,
-        name: data.name || prev.name,
-        lastPlan: data.lastPurchasePlan || data.lastPlan || null,
-        lastPurchaseAmount: data.lastPurchaseAmount || null,
-        lastPurchaseCredits: data.lastPurchaseCredits || null,
-        lastPurchaseDate: data.lastPurchase || null,
-      }));
-    });
-    return () => unsubscribe();
-  }, [userId]);
 
 
   const handleSalvarNovaSenha = async () => {
@@ -4424,14 +5776,8 @@ const App: React.FC = () => {
       }
 
       const userData = userSnap.data() || { credits: 1 };
-      setUserState(prev => ({ 
-        ...prev, 
-        email: userEmail, 
-        credits: userData.credits ?? 0,
-        name: userData.nome || userData.name || '',
-        lastPlan: userData.lastPlan || null
-      }));
-      setScreen(Screen.ONBOARDING);
+      // setUserState removido para deixar o listenToUser gerenciar os dados
+      setScreen(Screen.MAIN);
     } catch (error) {
       console.error('Erro ao processar login no Firestore:', error);
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -4440,15 +5786,8 @@ const App: React.FC = () => {
     // Solicita permissões de notificação e instalação PWA
     const requestPermissions = async () => {
       // 1. Permissão de Notificações
-      if ('Notification' in window && Notification.permission === 'default') {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          // Registra o token FCM
-          const token = await getMessagingToken();
-          if (token) {
-            await saveUserToken(user.uid, token);
-          }
-        }
+      if (userId) {
+        await requestNotificationPermission(userId);
       }
       
       // 2. Prompt de Instalação PWA
@@ -4464,7 +5803,18 @@ const App: React.FC = () => {
     setTimeout(requestPermissions, 2000); // Aguarda 2s após login
   };
 
+  const handleOpenCheckout = (url: string) => {
+    setPreviousScreen(screen);
+    setCheckoutUrl(url);
+    setScreen(Screen.CHECKOUT);
+  };
+
   const handleBuyCredits = async (plan: '20' | '30') => {
+    if (plan === '30') {
+      const checkoutUrl = `https://pay.cakto.com.br/wsopww7_808505?email=${encodeURIComponent(userState.email)}&external_id=${userId}`;
+      handleOpenCheckout(checkoutUrl);
+      return;
+    }
     try {
       const result = await createPixPayment(userId, plan, userState.email);
       if (result.url) {
@@ -4499,12 +5849,27 @@ const App: React.FC = () => {
     setScreen(Screen.FINALIZE);
   };
 
+  const handleStyleQuizComplete = async (style: string) => {
+    setUserState(prev => ({ ...prev, styleProfile: style }));
+    setScreen(Screen.CREDITS);
+    
+    if (userId) {
+      try {
+        await updateDoc(doc(db, 'users', userId), { styleProfile: style });
+      } catch (error) {
+        console.error('Erro ao salvar perfil de estilo:', error);
+      }
+    }
+  };
+
   const addToHistory = async (item: HistoryItem) => {
     // Salva no estado local
-    setUserState(prev => ({
-        ...prev,
-        history: [item, ...prev.history]
-    }));
+    setUserState(prev => {
+        return {
+            ...prev,
+            history: [item, ...prev.history],
+        };
+    });
     
     // Salva no Firestore
     if (userId) {
@@ -4537,6 +5902,7 @@ const App: React.FC = () => {
             clothingImage: compressedClothingImage,
             type: item.type,
             prompt: item.prompt || '',
+            stylistTip: item.stylistTip || '',
           }
         );
         console.log('✅ Histórico salvo no Firestore (comprimido)');
@@ -4562,11 +5928,93 @@ const App: React.FC = () => {
     setScreen(Screen.FAQ);
   };
 
+  const migrateOrphanedData = async (silent = true) => {
+    if (!auth.currentUser || !auth.currentUser.email) return;
+    const user = auth.currentUser;
+    const userEmail = user.email.toLowerCase().trim();
+    
+    if (!silent) {
+      setLoadingMessage('Sincronizando seus créditos...');
+      setScreen(Screen.LOADING);
+    }
+
+    try {
+      const usersRef = collection(db, 'users');
+      console.log('🔍 Querying for orphaned data with email:', userEmail);
+      const q = query(usersRef, where('email', '==', userEmail));
+      
+      let querySnapshot;
+      try {
+        querySnapshot = await getDocs(q);
+      } catch (queryErr: any) {
+        console.error('❌ Query Error during migration:', queryErr);
+        throw queryErr;
+      }
+      
+      let totalCredits = 0;
+      let foundOrphan = false;
+      let orphanedData = {};
+
+      const orphansToDelete: string[] = [];
+      querySnapshot.forEach((docSnap) => {
+        if (docSnap.id !== user.uid) {
+          console.log('🔍 Found orphaned document:', docSnap.id, docSnap.data());
+          const data = docSnap.data();
+          const creditsToAdd = Number(data.credits ?? data.exp ?? 0);
+          totalCredits += creditsToAdd;
+          orphanedData = { ...orphanedData, ...data };
+          foundOrphan = true;
+          orphansToDelete.push(docSnap.id);
+        }
+      });
+
+      if (foundOrphan && totalCredits > 0) {
+        console.log('🚀 Migrating', totalCredits, 'credits to UID:', user.uid);
+        const primaryRef = doc(db, 'users', user.uid);
+        
+        await setDoc(primaryRef, {
+          ...orphanedData,
+          uid: user.uid,
+          email: userEmail,
+          credits: increment(totalCredits),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+
+        for (const orphanId of orphansToDelete) {
+          try {
+            await deleteDoc(doc(db, 'users', orphanId));
+            console.log('✅ Deleted orphan:', orphanId);
+          } catch (delErr) {
+            console.error('⚠️ Error deleting orphan (continuing):', orphanId, delErr);
+          }
+        }
+        
+        if (!silent) {
+          alert(`✅ Sincronização concluída! ${totalCredits} créditos recuperados.`);
+          setScreen(Screen.CREDITS);
+        }
+      } else {
+        console.log('ℹ️ No orphaned credits found for migration.');
+        if (!silent) {
+          alert('✅ Seus créditos já estão sincronizados.');
+          setScreen(Screen.CREDITS);
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Migration Error:', error);
+      const errorMessage = error.message || 'Erro desconhecido';
+      if (!silent) {
+        alert(`❌ Erro ao sincronizar créditos: ${errorMessage}`);
+        setScreen(Screen.CREDITS);
+      }
+    }
+  };
+
   const handleBackFromFAQ = () => {
     if (previousScreen) {
         setScreen(previousScreen);
     } else {
-        setScreen(Screen.ONBOARDING);
+        setScreen(Screen.MAIN);
     }
     setPreviousScreen(null);
   };
@@ -4590,24 +6038,43 @@ const App: React.FC = () => {
     setUserState(prev => ({ ...prev, clothingImage: clothingImageUrl }));
     setScreen(Screen.LOADING);
 
+    const categoryToUse = userState.selectedCategory || "clothes";
+    console.log('🚀 [Try-On] Iniciando geração...', {
+      category: categoryToUse,
+      hasUserImage: !!userState.uploadedImage,
+      hasClothingImage: !!clothingImageUrl
+    });
+
     try {
-      const userBase64 = userState.uploadedImage 
+      const userB64Raw = userState.uploadedImage 
         ? await urlToBase64(userState.uploadedImage) 
         : "";
-      const clothingBase64 = await urlToBase64(clothingImageUrl);
+      const clothingB64Raw = await urlToBase64(clothingImageUrl);
 
-      if (!userBase64 || !clothingBase64) {
+      if (!userB64Raw || !clothingB64Raw) {
         throw new Error("Erro ao processar imagens.");
       }
+
+      // Compressão para garantir estabilidade e performance (768px é o ideal para o modelo Vertex AI)
+      const [userBase64, clothingBase64] = await Promise.all([
+        compressImage(`data:image/jpeg;base64,${userB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
+        compressImage(`data:image/jpeg;base64,${clothingB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1])
+      ]);
 
       const resultImage = await generateTryOnLook(
         userBase64, 
         clothingBase64, 
-        userState.selectedCategory || "clothes"
+        categoryToUse
       );
 
       if (!resultImage) {
         throw new Error("Nenhuma imagem foi gerada.");
+      }
+
+      // Log para depuração: verificar se a imagem mudou (comparação simples de tamanho/prefixo)
+      console.log('📸 [Try-On] Imagem gerada com sucesso. Tamanho:', resultImage.length);
+      if (resultImage.includes(userBase64.substring(0, 100))) {
+        console.warn('⚠️ [Try-On] A imagem gerada parece ser idêntica à original. O modelo pode ter falhado em aplicar a roupa.');
       }
 
       // Salva no Firebase Storage via Cloud Function (Resolve CORS)
@@ -4630,6 +6097,10 @@ const App: React.FC = () => {
         setUrlPublicaImagem('');
       }
 
+      // Gera um elogio personalizado baseado na peça
+      const compliment = await generateCompliment(clothingBase64);
+      setUserState(prev => ({ ...prev, lastCompliment: compliment }));
+
       // Sucesso — salva no histórico
       addToHistory({
         id: Date.now().toString(),
@@ -4637,11 +6108,58 @@ const App: React.FC = () => {
         generatedImage: resultImage,
         userImage: userState.uploadedImage!,
         clothingImage: clothingImageUrl,
-        type: 'UPLOAD'
+        type: 'UPLOAD',
+        stylistTip: getStylistTip(userState.selectedCategory || 'default'),
+        compliment: compliment
       });
 
       setUserState(prev => ({ ...prev, generatedImage: resultImage }));
       setScreen(Screen.RESULT);
+
+      // Atualiza estatísticas de gamificação
+      if (userId) {
+        const today = new Date().toISOString().split('T')[0];
+        // totalPhotosGenerated já é incrementado no deductCredit
+        const currentTotalPhotos = userState.totalPhotosGenerated || 0;
+        const currentDailyUsage = userState.dailyUsage?.date === today ? userState.dailyUsage.count : 0;
+        const newDailyUsage = currentDailyUsage + 10;
+        
+        // Define o badge baseado no total de fotos
+        let newBadge = userState.badge;
+        if (currentTotalPhotos >= 100) newBadge = 'diamond';
+        else if (currentTotalPhotos >= 60) newBadge = 'gold';
+        else if (currentTotalPhotos >= 40) newBadge = 'silver';
+        else if (currentTotalPhotos >= 20) newBadge = 'bronze';
+
+        try {
+          await updateDoc(doc(db, 'users', userId), {
+            dailyUsage: { date: today, count: newDailyUsage, claimedChest: userState.dailyUsage?.claimedChest || false },
+            badge: newBadge
+          });
+          setUserState(prev => ({ 
+            ...prev, 
+            dailyUsage: { date: today, count: newDailyUsage, claimedChest: prev.dailyUsage?.claimedChest || false },
+            badge: newBadge as any
+          }));
+        } catch (err) {
+          console.error('Erro ao atualizar gamificação:', err);
+        }
+      }
+
+      // Extrai tags de estilo em segundo plano para não travar a UI
+      extractStyleTags(clothingBase64).then(async (newTags) => {
+        if (newTags.length > 0 && userId) {
+          const updatedTags = [...(userState.styleTags || []), ...newTags].slice(-20); // Mantém as últimas 20 tags
+          
+          // Salva no Firestore
+          try {
+            await updateDoc(doc(db, 'users', userId), { styleTags: updatedTags });
+            setUserState(prev => ({ ...prev, styleTags: updatedTags }));
+          } catch (error) {
+            console.error('Erro ao salvar styleTags:', error);
+          }
+        }
+      });
 
       setTimeout(() => {
         const jaAvaliou = localStorage.getItem(`avaliou_${userId}`);
@@ -4651,7 +6169,12 @@ const App: React.FC = () => {
       }, 2500);
 
     } catch (error: any) {
-      console.error('Erro na geração:', error);
+      console.error('Erro detalhado na geração:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        stack: error.stack
+      });
       
       // DEVOLVE OS 10 CRÉDITOS AUTOMATICAMENTE
       try {
@@ -4663,15 +6186,20 @@ const App: React.FC = () => {
 
       // Verifica tipo de erro para mensagem certa
       const errorMsg = error?.message || '';
+      const errorCode = error?.code || '';
       
-      if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('Too Many Requests')) {
-        alert('⚠️ Muitos usuários gerando imagens ao mesmo tempo.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente em alguns instantes.');
-      } else if (errorMsg.includes('timeout') || errorMsg.includes('deadline')) {
-        alert('⏱️ A geração demorou muito e foi cancelada.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente.');
-      } else {
-        alert('❌ Erro ao gerar imagem.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente em instantes.');
+      let displayMsg = '❌ Erro ao gerar imagem.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente em instantes.';
+      
+      if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('Too Many Requests') || errorCode === 'resource-exhausted') {
+        displayMsg = '⚠️ Muitos usuários gerando imagens ao mesmo tempo.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente em alguns instantes.';
+      } else if (errorMsg.includes('timeout') || errorMsg.includes('deadline') || errorCode === 'deadline-exceeded') {
+        displayMsg = '⏱️ A geração demorou muito e foi cancelada.\n\nSeus 10 créditos foram devolvidos!\n\nTente novamente.';
+      } else if (errorMsg.includes('not-found') || errorMsg.includes('Não foi possível gerar a imagem')) {
+        displayMsg = '🔍 A IA não conseguiu identificar a pessoa ou a roupa.\n\nCertifique-se de que a pessoa e a peça estão bem visíveis e com fundo simples.';
       }
 
+      setErrorMessage(displayMsg);
+      setShowErrorModal(true);
       setScreen(Screen.FINALIZE);
     }
   };
@@ -4680,54 +6208,101 @@ const App: React.FC = () => {
     setScreen(Screen.VIEW_360);
   };
 
-  const handleGenerate360 = async (sideImgUrl: string, backImgUrl: string) => {
+  const handleGenerate360 = async (sideImgUrl: string, backImgUrl: string, clothingBackImgUrl: string | null) => {
      if (userState.credits < 20) {
        alert('⚠️ Você precisa de pelo menos 20 créditos para gerar a visualização 360°.');
        handleOpenCredits();
        return;
      }
 
+     // Desconta 20 créditos ANTES de gerar
+     const ok = await deductCredit(userId, 20);
+     if (!ok) {
+       alert('Erro ao processar créditos. Tente novamente.');
+       return;
+     }
+
      setLoadingMessage("Gerando visualização 360°...");
+     setIs360Loading(true);
      setAspectRatio('original');
-     setUserState(prev => ({ ...prev, sideImage: sideImgUrl, backImage: backImgUrl }));
+     setUserState(prev => ({ ...prev, sideImage: sideImgUrl, backImage: backImgUrl, clothingBackImage: clothingBackImgUrl }));
      setScreen(Screen.LOADING);
      
-     // Preparar Base64 para as 3 imagens
-     // Se já temos a imagem gerada de frente, não precisamos gerar de novo
-     const frontB64Raw = userState.generatedImage ? null : (userState.uploadedImage ? await urlToBase64(userState.uploadedImage) : "");
-     const sideB64Raw = await urlToBase64(sideImgUrl);
-     const backB64Raw = await urlToBase64(backImgUrl);
-     const clothingB64Raw = userState.clothingImage ? await urlToBase64(userState.clothingImage) : "";
+     try {
+       // Preparar Base64 para as 3 imagens
+       // Se já temos a imagem gerada de frente, não precisamos gerar de novo
+       const frontB64Raw = userState.generatedImage ? null : (userState.uploadedImage ? await urlToBase64(userState.uploadedImage) : "");
+       const sideB64Raw = await urlToBase64(sideImgUrl);
+       const backB64Raw = await urlToBase64(backImgUrl);
+       const clothingB64Raw = userState.clothingImage ? await urlToBase64(userState.clothingImage) : "";
+       const clothingBackB64Raw = clothingBackImgUrl ? await urlToBase64(clothingBackImgUrl) : null;
 
-     // Comprimir para evitar erro de payload muito grande e timeout
-     const frontB64 = frontB64Raw ? await compressImage(`data:image/jpeg;base64,${frontB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]) : null;
-     const sideB64 = await compressImage(`data:image/jpeg;base64,${sideB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]);
-     const backB64 = await compressImage(`data:image/jpeg;base64,${backB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]);
-     const clothingB64 = await compressImage(`data:image/jpeg;base64,${clothingB64Raw}`, 1024, 1024, 0.7).then(res => res.split(',')[1]);
+        // Revertendo para 768px para garantir estabilidade, pois 1024px pode causar falhas no modelo Vertex AI
+        const [frontB64, sideB64, backB64, clothingB64, clothingBackB64] = await Promise.all([
+          frontB64Raw ? compressImage(`data:image/jpeg;base64,${frontB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]) : Promise.resolve(null),
+          compressImage(`data:image/jpeg;base64,${sideB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
+          compressImage(`data:image/jpeg;base64,${backB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
+          compressImage(`data:image/jpeg;base64,${clothingB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
+          clothingBackB64Raw ? compressImage(`data:image/jpeg;base64,${clothingBackB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]) : Promise.resolve(null)
+        ]);
 
-     if (sideB64 && backB64 && clothingB64) {
-        try {
-          const results = await generate360View(frontB64, sideB64, backB64, clothingB64, userState.selectedCategory || "clothes");
-          
-          // Se pulamos a geração da frente, usamos a imagem que já temos
-          const finalResults = [...results];
-          if (frontB64 === null && userState.generatedImage) {
-            finalResults[0] = userState.generatedImage;
-          }
-          
-          // Deduct 20 credits
-          if (userId) {
-            await deductCredit(userId, 20);
-          }
-          
-          setUserState(prev => ({ ...prev, generated360Images: finalResults, credits: prev.credits - 20 }));
-          setScreen(Screen.RESULT_360);
-        } catch (error) {
-          console.error('Erro ao gerar 360:', error);
-          setScreen(Screen.VIEW_360);
-        }
-     } else {
-        setScreen(Screen.VIEW_360); // Error fallback
+       if (sideB64 && backB64 && clothingB64) {
+           const results = await generate360View(frontB64, sideB64, backB64, clothingB64, userState.selectedCategory || "clothes", clothingBackB64);
+           
+           // Se pulamos a geração da frente, usamos a imagem que já temos
+           const finalResults = [...results];
+           if (frontB64 === null && userState.generatedImage) {
+             finalResults[0] = userState.generatedImage;
+           }
+           
+           setUserState(prev => ({ ...prev, generated360Images: finalResults }));
+           setIs360Loading(false);
+           setScreen(Screen.RESULT_360);
+
+           // Atualiza estatísticas de gamificação para 360 (consome 20 créditos)
+           if (userId) {
+             const today = new Date().toISOString().split('T')[0];
+             const currentDailyUsage = userState.dailyUsage?.date === today ? userState.dailyUsage.count : 0;
+             const newDailyUsage = currentDailyUsage + 20;
+             
+             try {
+               await updateDoc(doc(db, 'users', userId), {
+                 dailyUsage: { 
+                   date: today, 
+                   count: newDailyUsage, 
+                   claimedChest: userState.dailyUsage?.claimedChest || false 
+                 }
+               });
+               setUserState(prev => ({ 
+                 ...prev, 
+                 dailyUsage: { 
+                   date: today, 
+                   count: newDailyUsage, 
+                   claimedChest: prev.dailyUsage?.claimedChest || false 
+                 }
+               }));
+             } catch (err) {
+               console.error('Erro ao atualizar gamificação 360:', err);
+             }
+           }
+       } else {
+          throw new Error("Erro ao processar imagens para 360.");
+       }
+     } catch (error) {
+       console.error('Erro ao gerar 360:', error);
+       
+       // DEVOLVE OS 20 CRÉDITOS AUTOMATICAMENTE
+       try {
+         await addCredits(userId, 20);
+         console.log('✅ 20 créditos devolvidos');
+       } catch (creditError) {
+         console.error('Erro ao devolver créditos:', creditError);
+       }
+
+       alert('❌ Erro ao gerar visualização 360°.\n\nSeus 20 créditos foram devolvidos!\n\nTente novamente em instantes.');
+       
+       setIs360Loading(false);
+       setScreen(Screen.VIEW_360);
      }
   };
 
@@ -4755,7 +6330,7 @@ const App: React.FC = () => {
   };
 
   const handleBackToHome = () => {
-      setScreen(Screen.ONBOARDING);
+      setScreen(Screen.MAIN);
   };
 
   const salvarAvaliacao = async () => {
@@ -4848,7 +6423,7 @@ const App: React.FC = () => {
       }));
       
       alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVocê recebeu 10 créditos iniciais.');
-      setScreen(Screen.ONBOARDING);
+      setScreen(Screen.MAIN);
       
     } catch (error: any) {
       console.error('Erro ao cadastrar:', error);
@@ -4914,7 +6489,7 @@ const App: React.FC = () => {
       setCadastroSenha('');
       setCadastroConfirmarSenha('');
       
-      setScreen(Screen.ONBOARDING);
+      setScreen(Screen.MAIN);
     } catch (error) {
       console.error('Erro no login Google (Cadastro):', error);
       alert('Erro ao fazer login com Google. Tente novamente.');
@@ -5004,7 +6579,7 @@ const App: React.FC = () => {
 
               <div className="space-y-6">
                 <div className="text-center">
-                  <h2 className="text-2xl font-bold text-gray-900">Recuperar Senha</h2>
+                  <h2 className="text-2xl font-bold text-[#2E0249]">Recuperar Senha</h2>
                   <p className="text-gray-500 text-sm mt-2">Enviaremos um link para o seu e-mail</p>
                 </div>
 
@@ -5105,22 +6680,27 @@ const App: React.FC = () => {
         );
       case Screen.NO_REGISTRATION:
         return <NoRegistrationScreen onBack={() => setScreen(Screen.LOGIN)} />;
-      case Screen.ONBOARDING:
+      case Screen.MAIN:
         content = (
           <HomeScreen 
-             onUpload={handleHomeUpload} 
-             onContinue={handleConfirmUpload}
-             uploadedImage={userState.uploadedImage}
-             userName={getUserName()} 
-             onOpenFAQ={handleOpenFAQ}
-             isFirstLogin={isFirstLogin}
-             onGuiaVisto={() => {
-               setIsFirstLogin(false);
-               localStorage.setItem(`guia_visto_${userId}`, 'true');
-             }}
+            onUpload={handleHomeUpload} 
+            onContinue={handleConfirmUpload}
+            uploadedImage={userState.uploadedImage}
+            userName={getUserName()} 
+            onOpenFAQ={handleOpenFAQ}
+            isFirstLogin={isFirstLogin}
+            isPremium={isPremiumUser}
+            onGuiaVisto={() => {
+              setIsFirstLogin(false);
+              localStorage.setItem(`guia_visto_${userId}`, 'true');
+            }}
           />
         );
+        showBanner = true;
         break;
+      case Screen.ONBOARDING:
+        setScreen(Screen.MAIN);
+        return null;
       case Screen.FAQ:
         content = <FAQScreen onBack={handleBackFromFAQ} />;
         onBack = handleBackFromFAQ;
@@ -5152,21 +6732,31 @@ const App: React.FC = () => {
                 history={userState.history}
                 onAddCredits={handleOpenCredits}
                 onBuyCredits={handleBuyCredits}
+                onOpenCheckout={handleOpenCheckout}
                 onBack={handleBackToHome}
                 onUpdateProfile={handleUpdateProfile}
                 onReuse={handleReuseHistoryItem}
                 onOpenFAQ={handleOpenFAQ}
+                onSyncCredits={() => migrateOrphanedData(false)}
                 setUserId={setUserId}
                 setScreen={setScreen}
+                isAdmin={isAdmin}
             />
         );
         onBack = handleBackToHome;
         showBanner = false; // Hide banner on Profile
         break;
       case Screen.CATEGORY:
-        content = <CategoryScreen onSelect={handleCategorySelect} onBack={() => setScreen(Screen.ONBOARDING)} />;
-        onBack = () => setScreen(Screen.ONBOARDING);
+        content = <CategoryScreen onSelect={handleCategorySelect} onBack={() => { setScreen(Screen.MAIN); }} isPremium={isPremiumUser} onOpenPremiumModal={() => setShowPremiumModal(true)} />;
+        onBack = () => { setScreen(Screen.MAIN); };
         break;
+      case Screen.STYLE_QUIZ:
+        return (
+          <StyleQuizScreen 
+            onComplete={handleStyleQuizComplete}
+            onBack={() => setScreen(Screen.CREDITS)}
+          />
+        );
       case Screen.FINALIZE:
         content = (
           <FinalizeScreen 
@@ -5177,6 +6767,7 @@ const App: React.FC = () => {
             onBack={() => setScreen(Screen.CATEGORY)}
             loading={false}
             isPremium={isPremiumUser}
+            initialClothingImage={userState.clothingImage}
           />
         );
         onBack = () => setScreen(Screen.CATEGORY);
@@ -5187,6 +6778,7 @@ const App: React.FC = () => {
             message={loadingMessage} 
             userImage={userState.uploadedImage}
             clothingImage={userState.clothingImage}
+            is360={is360Loading}
           />
         );
       case Screen.RESULT:
@@ -5197,13 +6789,24 @@ const App: React.FC = () => {
             generatedImage={userState.generatedImage}
             onRestart={handleRestart}
             onView360={handleView360}
-            onBack={() => setScreen(Screen.CATEGORY)}
+            onBack={() => setScreen(Screen.FINALIZE)}
+            onOpenPremiumModal={() => setShowPremiumModal(true)}
+            onOpenCheckout={handleOpenCheckout}
             userState={userState}
             aspectRatio={aspectRatio}
             setAspectRatio={setAspectRatio}
           />
         );
-        onBack = () => setScreen(Screen.RESULT);
+        onBack = () => setScreen(Screen.FINALIZE);
+        break;
+      case Screen.CHECKOUT:
+        content = (
+          <CheckoutScreen 
+            url={checkoutUrl || "https://pay.cakto.com.br/wsopww7_808505?"} 
+            onBack={() => setScreen(previousScreen || Screen.ONBOARDING)} 
+          />
+        );
+        onBack = () => setScreen(previousScreen || Screen.ONBOARDING);
         break;
       case Screen.VIEW_360:
          content = (
@@ -5223,6 +6826,7 @@ const App: React.FC = () => {
              onRestart={handleRestart}
              onBack={() => setScreen(Screen.RESULT)}
              userState={userState}
+             onOpenPremiumModal={() => setShowPremiumModal(true)}
              aspectRatio={aspectRatio}
              setAspectRatio={setAspectRatio}
            />
@@ -5249,10 +6853,12 @@ const App: React.FC = () => {
           credits={userState.credits} 
           onOpenCredits={handleOpenCredits} 
           onOpenFAQ={handleOpenFAQ}
+          onOpenPremiumModal={() => setShowPremiumModal(true)}
           showBanner={showBanner}
           isPremium={isPremiumUser}
           onBack={onBack}
           backIcon={backIcon}
+          styleTags={userState.styleTags}
         >
           {content}
         </MainLayout>
@@ -5263,8 +6869,26 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-[100dvh] max-w-lg mx-auto bg-white shadow-2xl overflow-hidden relative font-sans text-gray-900 flex flex-col">
+      <div className="w-full h-[100dvh] max-w-lg mx-auto bg-white shadow-2xl overflow-hidden relative font-sans text-[#2E0249] flex flex-col">
         {renderScreen()}
+
+        {/* Modal de Erro Customizado */}
+        {showErrorModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl transform animate-scale-in text-center">
+              <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6 text-red-600">
+                <AlertTriangle size={40} />
+              </div>
+              <h3 className="text-xl font-bold text-[#2E0249] mb-4">Ops! Algo deu errado</h3>
+              <div className="text-gray-600 mb-8 whitespace-pre-line">
+                {errorMessage}
+              </div>
+              <Button onClick={() => setShowErrorModal(false)} className="w-full">
+                Entendi
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Modal de Sucesso Recuperação de Senha */}
         {showSuccessModal && (
@@ -5273,7 +6897,7 @@ const App: React.FC = () => {
               <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
                 <Check size={40} strokeWidth={3} />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Link Enviado!</h3>
+              <h3 className="text-xl font-bold text-[#2E0249] mb-4">Link Enviado!</h3>
               <p className="text-gray-600 mb-2">
                 Foi enviado para você um link de recuperação para você redefinir sua senha.
               </p>
@@ -5282,6 +6906,46 @@ const App: React.FC = () => {
               </p>
               <Button onClick={() => setShowSuccessModal(false)} className="w-full">
                 Entendi
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Premium Persuasivo */}
+        {showPremiumModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl transform animate-scale-in text-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-purple-600 to-pink-500"></div>
+              <button 
+                onClick={() => setShowPremiumModal(false)} 
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X size={24} />
+              </button>
+              
+              <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-6 text-purple-600 shadow-inner">
+                <ShieldCheck size={40} />
+              </div>
+              
+              <h3 className="text-2xl font-black text-[#2E0249] mb-4 tracking-tight">🔒 OPORTUNIDADE EXCLUSIVA!</h3>
+              
+              <div className="space-y-4 mb-8">
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  Liberte o poder do <span className="font-bold text-purple-600">Plano Premium (R$ 29,90)</span> agora mesmo! 💎
+                </p>
+                <p className="text-gray-600 text-sm leading-relaxed font-medium">
+                  Não perca a chance de aproveitar os descontos especiais e as ofertas secretas que a Pandora AI selecionou para o seu estilo.
+                </p>
+                <p className="text-purple-700 text-xs font-bold bg-purple-50 py-2 px-4 rounded-full inline-block">
+                  Economize de verdade nas maiores lojas do Brasil! 🛍️✨
+                </p>
+              </div>
+              
+              <Button onClick={() => { 
+                setShowPremiumModal(false); 
+                handleOpenCheckout("https://pay.cakto.com.br/wsopww7_808505?");
+              }}>
+                Quero ser Premium agora!
               </Button>
             </div>
           </div>
@@ -5427,6 +7091,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Modal Admin */}
       </div>
     </ErrorBoundary>
   );
