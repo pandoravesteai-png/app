@@ -6,6 +6,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isOwner(userId) {
+      return isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email != null && request.auth.token.email.lower() == userId.lower()));
+    }
+
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
@@ -24,14 +28,13 @@ service cloud.firestore {
       
       // Permite atualizar ou deletar se for o dono, admin, ou se o documento pertencer ao email do usuário (migração)
       allow update, delete: if isAuthenticated() && 
-                             (request.auth.uid == userId || 
+                             (isOwner(userId) || 
                               isAdmin() || 
-                              (resource != null && resource.data.email != null && resource.data.email.lower() == request.auth.token.email.lower()) ||
-                              (resource != null && resource.id == request.auth.uid));
+                              (resource != null && resource.data.email != null && resource.data.email.lower() == request.auth.token.email.lower()));
       
       match /{subcollection}/{docId} {
-        allow read: if isAuthenticated() && (userId == request.auth.uid || isAdmin());
-        allow write: if isAuthenticated() && (userId == request.auth.uid || isAdmin());
+        allow read: if isAuthenticated();
+        allow write: if isOwner(userId) || isAdmin();
       }
     }
 

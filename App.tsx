@@ -456,53 +456,22 @@ const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
 
 // --- Helper Functions ---
 async function urlToBase64(url: string): Promise<string> {
-  if (!url) return "";
-  if (url.startsWith('data:image')) return url.split(',')[1];
-  
   try {
-    // Tenta fetch primeiro (funciona para blob: e same-origin)
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const blob = await response.blob();
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
           const base64String = reader.result as string;
+          // Remove data:image/jpeg;base64, prefix or similar
           resolve(base64String.split(',')[1]); 
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    console.warn("Fetch falhou, tentando objeto Image para CORS", e);
-    // Fallback para objeto Image para URLs externas com CORS (como Unsplash)
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve("");
-            return;
-          }
-          ctx.drawImage(img, 0, 0);
-          const dataURL = canvas.toDataURL('image/jpeg');
-          resolve(dataURL.split(',')[1]);
-        } catch (err) {
-          console.error("Erro ao desenhar no canvas para base64", err);
-          resolve("");
-        }
-      };
-      img.onerror = (err) => {
-        console.error("Erro ao converter para base64 via Image", err);
-        resolve("");
-      };
-      img.src = url;
-    });
+    console.error("Error converting to base64", e);
+    return "";
   }
 }
 
@@ -3068,7 +3037,7 @@ const MainLayout: React.FC<{
         setHackedDeals(data.deals);
       }
     } catch (error) {
-      // Erro silenciado para o scanner não ser intrusivo
+      console.error("Erro no scanner:", error);
     } finally {
       setIsScanning(false);
     }
