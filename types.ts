@@ -66,6 +66,8 @@ export interface UserState {
   lastRouletteSpin?: string | null;
   rechargeCount?: number;
   badge?: 'bronze' | 'silver' | 'gold' | 'diamond' | null;
+  goldRewardClaimed?: boolean;
+  diamondRewardClaimed?: boolean;
   pendingCredits?: number;
   loyaltyBonusClaimed?: boolean;
   closetLimit?: number;

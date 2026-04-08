@@ -10,6 +10,28 @@ const getAiClient = () => {
     return new GoogleGenAI({ apiKey });
 };
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function callGeminiWithRetry(fn: () => Promise<any>, maxRetries = 3): Promise<any> {
+  let lastError: any;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      const isQuotaError = error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED");
+      if (isQuotaError && i < maxRetries - 1) {
+        const waitTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
+        console.warn(`Gemini Quota exceeded. Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
+        await sleep(waitTime);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
 export const generateFashionTip = async (prompt: string): Promise<string> => {
   const ai = getAiClient();
   
@@ -18,10 +40,10 @@ export const generateFashionTip = async (prompt: string): Promise<string> => {
   }
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callGeminiWithRetry(() => ai.models.generateContent({
       model: 'gemini-2.0-flash',
       contents: `Você é um assistente de moda especialista da Pandora AI. Responda de forma curta, estilosa e encorajadora em português. Pergunta: ${prompt}`,
-    });
+    }));
     
     return response.text || "Experimente combinar cores vibrantes com acessórios minimalistas para um look moderno.";
   } catch (error) {
@@ -35,7 +57,7 @@ export const extractStyleTags = async (imageBase64: string): Promise<string[]> =
   if (!ai) return [];
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callGeminiWithRetry(() => ai.models.generateContent({
       model: 'gemini-2.0-flash',
       contents: [
         {
@@ -48,13 +70,13 @@ export const extractStyleTags = async (imageBase64: string): Promise<string[]> =
           text: "Analise esta peça de roupa e retorne apenas 3 a 5 palavras-chave de estilo, cor ou material separadas por vírgula. Exemplo: Linho, Minimalista, Tons Pastéis, Verão. Retorne apenas as palavras."
         }
       ]
-    });
+    }));
 
     const text = response.text || "";
     return text.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
   } catch (error) {
     console.error("Error extracting style tags:", error);
-    return [];
+    return ["Estilo", "Moda", "Tendência"]; // Fallback tags
   }
 };
 
@@ -63,7 +85,7 @@ export const generateCompliment = async (clothingImageBase64: string): Promise<s
   if (!ai) return "Você tem um ótimo gosto para moda!";
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callGeminiWithRetry(() => ai.models.generateContent({
       model: 'gemini-2.0-flash',
       contents: [
         {
@@ -76,7 +98,7 @@ export const generateCompliment = async (clothingImageBase64: string): Promise<s
           text: "Analise esta peça de roupa. Identifique se é masculina, feminina ou unissex e qual é a peça. Em seguida, gere um elogio curto, criativo e entusiasmado em português (máximo 15 palavras) sobre o estilo da peça. FOCO APENAS NA ROUPA. Não mencione o corpo ou o rosto do usuário. Não use sempre as mesmas palavras, seja variado e estiloso. Retorne apenas o elogio."
         }
       ]
-    });
+    }));
 
     return response.text || "Essa peça é incrível e combina perfeitamente com seu estilo!";
   } catch (error) {

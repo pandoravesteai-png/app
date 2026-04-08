@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { useState, useEffect, useRef, Component, useMemo } from 'react';
+import { useState, useEffect, useRef, Component, useMemo, useCallback } from 'react';
 import { processCreditRelease } from './services/creditsService';
 import { Screen, UserState, ClothingType, HistoryItem } from './types';
 import { AppLogo, Button, Input } from './components/UI';
 import { CATEGORIES, HOME_CAROUSEL_1 } from './constants';
-import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle, HelpCircle, Star, User, ShoppingBag, ChevronRight, Terminal, Trophy, Gift, RotateCw, Archive } from 'lucide-react';
+import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle, HelpCircle, Star, User, ShoppingBag, ChevronRight, Terminal, Trophy, Gift, RotateCw, Archive, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { GoogleGenAI } from "@google/genai";
@@ -23,11 +23,81 @@ import {
 } from 'firebase/auth';
 import { generateFashionTip, generateTryOnLook, generate360View, extractStyleTags, generateCompliment } from './services/geminiService';
 import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider, requestNotificationPermission } from './services/firebase';
-import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail, purchasePremium, claimChest, unlockClosetSpace } from './services/creditsService';
+import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail, purchasePremium, claimChest, unlockClosetSpace, claimBadgeReward } from './services/creditsService';
 import { createPixPayment } from './services/paymentService';
 
 
 // --- Helper functions ---
+const createCombinedImage = async (before: string, after: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return reject('No context');
+
+    const imgBefore = new Image();
+    const imgAfter = new Image();
+    
+    imgBefore.crossOrigin = "anonymous";
+    imgAfter.crossOrigin = "anonymous";
+    
+    let loaded = 0;
+    const onLoaded = () => {
+      loaded++;
+      if (loaded === 2) {
+        const width = 1200;
+        const height = 630;
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Draw images
+        ctx.drawImage(imgBefore, 0, 0, width/2, height);
+        ctx.drawImage(imgAfter, width/2, 0, width/2, height);
+        
+        // Divider
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(width/2, 0);
+        ctx.lineTo(width/2, height);
+        ctx.stroke();
+
+        // Labels
+        ctx.fillStyle = 'rgba(147, 51, 234, 0.9)'; // Purple
+        ctx.fillRect(20, 20, 120, 40);
+        ctx.fillRect(width/2 + 20, 20, 120, 40);
+        
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ANTES', 80, 48);
+        ctx.fillText('DEPOIS', width/2 + 80, 48);
+
+        // Logo/Watermark
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(width - 180, height - 50, 160, 35);
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('PANDORA AI', width - 100, height - 26);
+        
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      }
+    };
+    
+    imgBefore.onerror = () => reject('Error loading before image');
+    imgAfter.onerror = () => reject('Error loading after image');
+    
+    imgBefore.onload = onLoaded;
+    imgAfter.onload = onLoaded;
+    
+    imgBefore.src = before;
+    imgAfter.src = after;
+  });
+};
+
 const parseFirebaseDate = (date: any): Date | null => {
   if (!date) return null;
   if (date instanceof Date) return date;
@@ -593,6 +663,11 @@ const HomeCarousel: React.FC<{
 const SplashScreen: React.FC<{ onFinish: () => void }> = ({ onFinish }) => {
   const [progress, setProgress] = useState(0);
 
+  const onFinishRef = useRef(onFinish);
+  useEffect(() => {
+    onFinishRef.current = onFinish;
+  }, [onFinish]);
+
   useEffect(() => {
     const duration = 3000;
     const interval = 30;
@@ -605,12 +680,12 @@ const SplashScreen: React.FC<{ onFinish: () => void }> = ({ onFinish }) => {
       
       if (currentStep >= steps) {
         clearInterval(timer);
-        onFinish();
+        onFinishRef.current();
       }
     }, interval);
 
     return () => clearInterval(timer);
-  }, [onFinish]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center animate-fade-in">
@@ -1533,18 +1608,26 @@ const ProfileScreen: React.FC<{
     isAdmin?: boolean;
     onOpenAdmin?: () => void;
     onSyncCredits?: () => void;
-    showChestNotification?: boolean;
-    setShowChestNotification?: (show: boolean) => void;
-}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits, showChestNotification, setShowChestNotification }) => {
+    onBadgeClick?: (badgeLabel: string, min: number) => void;
+}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits, onBadgeClick }) => {
     const [editingName, setEditingName] = useState(false);
     const [showLogoutModal, setShowLogoutModal] = useState(false);
     const [newName, setNewName] = useState(userState.name || '');
     const [image, setImage] = useState<string | null>(userState.profileImage || null);
+    const [tempImage, setTempImage] = useState<string | null>(null);
+    const [isEditingImage, setIsEditingImage] = useState(false);
     const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryItem | null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+    useEffect(() => {
+        if (!editingName) {
+            setNewName(userState.name || '');
+        }
+        setImage(userState.profileImage || null);
+    }, [userState.name, userState.profileImage, editingName]);
 
     const handleDeleteSelected = async () => {
       if (selectedItems.length === 0) return;
@@ -1579,9 +1662,34 @@ const ProfileScreen: React.FC<{
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            const url = URL.createObjectURL(e.target.files[0]);
-            setImage(url);
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64String = reader.result as string;
+                setTempImage(base64String);
+                setIsEditingImage(true);
+            };
+            reader.readAsDataURL(file);
         }
+    };
+
+    const handleSaveImage = async () => {
+        if (tempImage) {
+            try {
+                await onUpdateProfile(newName || userState.name || '', tempImage);
+                setIsEditingImage(false);
+                setTempImage(null);
+                alert('✅ Foto de perfil atualizada!');
+            } catch (error) {
+                console.error('Erro ao salvar foto:', error);
+                alert('❌ Erro ao salvar foto. Tente novamente.');
+            }
+        }
+    };
+
+    const handleCancelImage = () => {
+        setIsEditingImage(false);
+        setTempImage(null);
     };
 
     // Função para salvar o nome no Firestore
@@ -1592,12 +1700,12 @@ const ProfileScreen: React.FC<{
       }
       
       try {
-        await updateDoc(doc(db, 'users', userId), { name: newName.trim() });
-        setUserState(prev => ({ ...prev, name: newName.trim() }));
+        await onUpdateProfile(newName.trim(), image);
         setEditingName(false);
         alert('✅ Nome atualizado!');
       } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
+        console.error('Erro ao salvar nome:', error);
+        alert('❌ Erro ao salvar nome. Tente novamente.');
       }
     };
 
@@ -1739,34 +1847,53 @@ const ProfileScreen: React.FC<{
 
             <div className="flex-1 flex flex-col items-center px-6 pt-4 pb-12">
                 {/* Profile Header */}
-                <div className="relative mb-6 group">
-                    <div className="w-24 h-24 bg-gradient-to-br from-purple-100 to-pink-100 rounded-full flex items-center justify-center text-3xl font-bold text-purple-700 shadow-sm border border-purple-100 overflow-hidden">
-                        {image ? (
-                            <img src={image} alt="Profile" className="w-full h-full object-cover" />
+                <div className="relative mb-6 group flex flex-col items-center">
+                    <div className="w-24 h-24 bg-gradient-to-br from-purple-100 to-pink-100 rounded-full flex items-center justify-center text-3xl font-bold text-purple-700 shadow-sm border border-purple-100 overflow-hidden relative">
+                        {(tempImage || image) ? (
+                            <img src={tempImage || image || ''} alt="Profile" className="w-full h-full object-cover" />
                         ) : (
                             (userState.name || 'U').charAt(0).toUpperCase()
                         )}
+                        
+                        {isEditingImage && (
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px]">
+                                <div className="animate-pulse text-white text-[10px] font-bold uppercase tracking-widest">
+                                    Nova Foto
+                                </div>
+                            </div>
+                        )}
                     </div>
                     
-                    <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="absolute bottom-0 right-0 bg-white p-2 rounded-full shadow-md border border-gray-100 text-purple-600 hover:bg-purple-50 transition-colors z-10"
-                    >
-                        <Upload size={14} />
-                    </button>
+                    {!isEditingImage ? (
+                        <button 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="absolute bottom-0 right-0 bg-white p-2 rounded-full shadow-md border border-gray-100 text-purple-600 hover:bg-purple-50 transition-colors z-10"
+                        >
+                            <Upload size={14} />
+                        </button>
+                    ) : (
+                        <div className="flex gap-2 mt-3 animate-slide-up">
+                            <button
+                                onClick={handleSaveImage}
+                                className="bg-green-500 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg shadow-green-200 flex items-center gap-1 active:scale-95 transition-transform"
+                            >
+                                <Check size={12} /> SALVAR
+                            </button>
+                            <button
+                                onClick={handleCancelImage}
+                                className="bg-white text-gray-500 px-3 py-1.5 rounded-full text-[10px] font-bold border border-gray-200 shadow-sm flex items-center gap-1 active:scale-95 transition-transform"
+                            >
+                                <X size={12} /> CANCELAR
+                            </button>
+                        </div>
+                    )}
 
                     <input 
                         type="file" 
                         ref={fileInputRef} 
                         className="hidden" 
                         accept="image/*"
-                        onChange={async (e) => {
-                            if (e.target.files && e.target.files[0]) {
-                                const url = URL.createObjectURL(e.target.files[0]);
-                                setImage(url);
-                                onUpdateProfile(userState.name || '', url);
-                            }
-                        }}
+                        onChange={handleFileChange}
                     />
                 </div>
                 
@@ -1783,48 +1910,58 @@ const ProfileScreen: React.FC<{
                   </label>
                   
                   {editingName ? (
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', width: '100%' }}>
                       <input
                         type="text"
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
                         placeholder="Digite seu nome"
                         style={{
-                          flex: 1,
+                          flex: '1 1 200px',
                           padding: '12px',
-                          borderRadius: '8px',
-                          border: '1px solid #ddd',
+                          borderRadius: '12px',
+                          border: '1px solid #e0e0e0',
                           fontSize: '15px',
+                          outline: 'none',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
                         }}
                       />
-                      <button
-                        onClick={handleSaveName}
-                        style={{
-                          padding: '12px 20px',
-                          background: '#9333ea',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          fontWeight: 'bold',
-                        }}>
-                        Salvar
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingName(false);
-                          setNewName(userState.name || '');
-                        }}
-                        style={{
-                          padding: '12px 20px',
-                          background: '#ddd',
-                          color: '#333',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                        }}>
-                        Cancelar
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', flex: '1 1 auto' }}>
+                        <button
+                          onClick={handleSaveName}
+                          style={{
+                            flex: 1,
+                            padding: '12px',
+                            background: '#9333ea',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '12px',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            boxShadow: '0 4px 12px rgba(147, 51, 234, 0.2)'
+                          }}>
+                          Salvar
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingName(false);
+                            setNewName(userState.name || '');
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '12px',
+                            background: '#f3f4f6',
+                            color: '#4b5563',
+                            border: 'none',
+                            borderRadius: '12px',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            fontSize: '14px'
+                          }}>
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div style={{
@@ -1875,9 +2012,13 @@ const ProfileScreen: React.FC<{
                         { label: 'Bronze', min: 20, color: 'text-orange-600', bg: 'bg-orange-100' },
                         { label: 'Prata', min: 40, color: 'text-gray-400', bg: 'bg-gray-100' },
                         { label: 'Ouro', min: 60, color: 'text-yellow-600', bg: 'bg-yellow-100', reward: '+50 ⚡' },
-                        { label: 'Diamante', min: 100, color: 'text-blue-500', bg: 'bg-blue-50', reward: '+200 ⚡' }
+                        { label: 'Diamante', min: 100, color: 'text-purple-500', bg: 'bg-purple-50', reward: '+200 ⚡' }
                       ].map((b, i) => (
-                        <div key={i} className="flex flex-col items-center gap-1 relative">
+                        <div 
+                          key={i} 
+                          className="flex flex-col items-center gap-1 relative cursor-pointer active:scale-95 transition-transform"
+                          onClick={() => onBadgeClick?.(b.label, b.min)}
+                        >
                           {b.reward && (
                             <div className="absolute -top-3 -right-2 bg-purple-600 text-white text-[7px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10 animate-pulse whitespace-nowrap">
                               {b.reward}
@@ -2960,6 +3101,8 @@ const MainLayout: React.FC<{
   styleTags?: string[];
   chestReady?: boolean;
   onOpenChest?: () => void;
+  showVipGroupModal?: boolean;
+  setShowVipGroupModal?: (show: boolean) => void;
 }> = ({ 
   children, 
   credits, 
@@ -2972,7 +3115,9 @@ const MainLayout: React.FC<{
   backIcon = 'arrow', 
   styleTags = [],
   chestReady = false,
-  onOpenChest
+  onOpenChest,
+  showVipGroupModal = false,
+  setShowVipGroupModal
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -2984,7 +3129,6 @@ const MainLayout: React.FC<{
 
   const [showCreditsInfo, setShowCreditsInfo] = useState(false);
   const [showFeedModal, setShowFeedModal] = useState(false);
-  const [showVipGroupModal, setShowVipGroupModal] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [hackedDeals, setHackedDeals] = useState<{title: string, price: string, platform: string, url: string}[]>([]);
 
@@ -3272,7 +3416,7 @@ const MainLayout: React.FC<{
           )}
 
           <button 
-            onClick={() => setShowVipGroupModal(true)}
+            onClick={() => setShowVipGroupModal?.(true)}
             className="w-8 h-8 rounded-full bg-white border border-gray-100 text-purple-600 flex items-center justify-center shadow-sm hover:bg-gray-50 transition-colors active:scale-95 relative"
           >
             <MessageCircle size={16} />
@@ -3305,7 +3449,7 @@ const MainLayout: React.FC<{
         {children}
       </div>
 
-      <VipGroupModal isOpen={showVipGroupModal} onClose={() => setShowVipGroupModal(false)} />
+      <VipGroupModal isOpen={showVipGroupModal} onClose={() => setShowVipGroupModal?.(false)} />
     </div>
   );
 };
@@ -3321,8 +3465,7 @@ const HomeScreen: React.FC<{
     onGuiaVisto?: () => void;
     userId?: string;
     userState?: UserState;
-    setShowChestNotification?: (show: boolean) => void;
-}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, isPremium = false, onGuiaVisto, userId, userState, setShowChestNotification }) => {
+}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, isPremium = false, onGuiaVisto, userId, userState }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
@@ -3446,11 +3589,11 @@ const HomeScreen: React.FC<{
           </div>
 
           {/* Privacy Assurance Block */}
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex gap-3 items-start">
-            <ShieldCheck className="text-blue-600 flex-shrink-0 mt-0.5" size={20} />
+          <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 flex gap-3 items-start">
+            <ShieldCheck className="text-purple-600 flex-shrink-0 mt-0.5" size={20} />
             <div>
-              <h4 className="text-xs font-bold text-blue-800 uppercase mb-1">Privacidade Garantida</h4>
-              <p className="text-[11px] text-blue-700 leading-relaxed">
+              <h4 className="text-xs font-bold text-purple-800 uppercase mb-1">Privacidade Garantida</h4>
+              <p className="text-[11px] text-purple-700 leading-relaxed">
                 Sua identidade é nossa prioridade. Nossa IA garante que seu rosto, cabelo e corpo permaneçam inalterados. Apenas a roupa será substituída. Você está no controle!
               </p>
             </div>
@@ -4283,7 +4426,7 @@ const Result360ImageItem: React.FC<{
 
       <div 
         ref={containerRef}
-        className={`relative w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-lg border-4 border-[#6A00F4] bg-[#6A00F4]/5 cursor-pointer touch-none transition-all duration-300`}
+        className={`relative w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-lg border-4 border-[#6A00F4] bg-[#6A00F4]/5 cursor-pointer ${zoomLevel > 1 ? 'touch-none' : 'touch-pan-y'} transition-all duration-300`}
         style={aspectRatio === 'original' && naturalAspectRatio ? { aspectRatio: naturalAspectRatio } : {}}
       >
         <div 
@@ -4544,7 +4687,9 @@ const ResultScreen: React.FC<{
   userState: UserState;
   aspectRatio: 'original' | '9/16' | '1/1' | '4/5';
   setAspectRatio: (ratio: 'original' | '9/16' | '1/1' | '4/5') => void;
-}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, onOpenPremiumModal, onOpenCheckout, userState, aspectRatio, setAspectRatio }) => {
+  onProfessionalShare: (before: string, after: string) => void;
+  isSharing: boolean;
+}> = ({ userImage, clothingImage, generatedImage, onRestart, onView360, onBack, onOpenPremiumModal, onOpenCheckout, userState, aspectRatio, setAspectRatio, onProfessionalShare, isSharing }) => {
   const [showImageModal, setShowImageModal] = useState<string | null>(null);
   const [showTapHint, setShowTapHint] = useState(() => {
     return localStorage.getItem('result_hint_visto') !== 'true';
@@ -4917,7 +5062,7 @@ const ResultScreen: React.FC<{
             {/* Generated Image */}
             <div 
                 ref={containerRef}
-                className={`w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-2xl border-4 border-[#6A00F4] relative bg-[#6A00F4]/5 mb-0 flex-shrink-0 group touch-none transition-all duration-300 flex items-center justify-center`}
+                className={`w-full ${getAspectRatioClass()} rounded-2xl overflow-hidden shadow-2xl border-4 border-[#6A00F4] relative bg-[#6A00F4]/5 mb-0 flex-shrink-0 group ${zoomLevel > 1 ? 'touch-none' : 'touch-pan-y'} transition-all duration-300 flex items-center justify-center`}
                 style={aspectRatio === 'original' && naturalAspectRatio ? { aspectRatio: naturalAspectRatio } : {}}
             >
                 <div 
@@ -5035,10 +5180,12 @@ const ResultScreen: React.FC<{
 
                 <div className="grid grid-cols-2 gap-3">
                   <button 
-                    onClick={() => compartilharWhatsApp(generatedImage || '')} 
-                    className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-[#25D366] hover:bg-[#128C7E] text-white border-none"
+                    onClick={() => onProfessionalShare(userImage || '', generatedImage || '')} 
+                    disabled={isSharing}
+                    className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-[#25D366] hover:bg-[#128C7E] text-white border-none disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    <MessageCircle size={18} /> WhatsApp
+                    {isSharing ? <Loader2 size={18} className="animate-spin" /> : <MessageCircle size={18} />}
+                    {isSharing ? 'Preparando...' : 'WhatsApp'}
                   </button>
                   <button 
                     onClick={() => compartilharInstagram()} 
@@ -5393,7 +5540,9 @@ const App: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<'original' | '9/16' | '1/1' | '4/5'>('original');
   const [isAdmin, setIsAdmin] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [showVipGroupModal, setShowVipGroupModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isSharing, setIsSharing] = useState(false);
   const [userState, setUserState] = useState<UserState>({
     email: '',
     name: '',
@@ -5425,31 +5574,70 @@ const App: React.FC = () => {
     dailyUsage: null,
     rechargeCount: 0,
     badge: null,
+    goldRewardClaimed: false,
+    diamondRewardClaimed: false,
     pendingCredits: 0,
     closetLimit: 10
   });
 
-  const [showChestNotification, setShowChestNotification] = useState(false);
   const [showAchievementModal, setShowAchievementModal] = useState(false);
+  const [showBadgeStatusModal, setShowBadgeStatusModal] = useState(false);
+  const [badgeStatusMessage, setBadgeStatusMessage] = useState({ title: '', text: '' });
   const [showChestModal, setShowChestModal] = useState(false);
   const [isClaimingChest, setIsClaimingChest] = useState(false);
-  const [achievedBadge, setAchievedBadge] = useState<'gold' | 'diamond' | null>(null);
+  const [achievedBadge, setAchievedBadge] = useState<'bronze' | 'silver' | 'gold' | 'diamond' | null>(null);
+  const [isUnlockingCloset, setIsUnlockingCloset] = useState(false);
   const [showClosetLimitModal, setShowClosetLimitModal] = useState(false);
   const [pendingClothingImageUrl, setPendingClothingImageUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (userId && userState.dailyUsage?.date === new Date().toISOString().split('T')[0]) {
-      if (userState.dailyUsage.count >= 30 && !userState.dailyUsage.claimedChest) {
-        setShowChestNotification(true);
-      } else {
-        setShowChestNotification(false);
-      }
-    }
-  }, [userState.dailyUsage, userId]);
-
   const isChestReady = userState.dailyUsage?.date === new Date().toISOString().split('T')[0] && 
-                      userState.dailyUsage.count >= 30 && 
-                      !userState.dailyUsage.claimedChest;
+                      Math.floor(userState.dailyUsage.count / 50) > (userState.dailyUsage.chestsClaimed || 0);
+
+  const handleBadgeClick = (badgeLabel: string, min: number) => {
+    const currentPhotos = userState.totalPhotosGenerated || 0;
+    const isUnlocked = currentPhotos >= min;
+    
+    let title = "";
+    let text = "";
+
+    if (isUnlocked) {
+      title = `NÍVEL ${badgeLabel.toUpperCase()}! 🏆`;
+      if (badgeLabel === 'Bronze') text = "Você já conquistou o Bronze! Falta pouco para você se tornar Prata! 🥈";
+      else if (badgeLabel === 'Prata') text = "Você é Prata! Você está quase chegando em Ouro! 🥇";
+      else if (badgeLabel === 'Ouro') text = "Você é Ouro! Você está no caminho para se tornar Diamante! 💎";
+      else if (badgeLabel === 'Diamante') text = "Você atingiu o nível máximo! Você é uma lenda do estilo! 👑";
+    } else {
+      const remaining = min - currentPhotos;
+      title = `NÍVEL ${badgeLabel.toUpperCase()}`;
+      text = `Este nível ainda está bloqueado. Faltam apenas ${remaining} fotos para você desbloquear e brilhar ainda mais! 🚀`;
+    }
+    
+    setBadgeStatusMessage({ title, text });
+    setShowBadgeStatusModal(true);
+  };
+
+  const handleClaimReward = async () => {
+    if (!userId || !achievedBadge) return;
+    if (achievedBadge !== 'gold' && achievedBadge !== 'diamond') {
+      setShowAchievementModal(false);
+      return;
+    }
+
+    try {
+      const amount = await claimBadgeReward(userId, achievedBadge);
+      if (amount > 0) {
+        confetti({
+          particleCount: 200,
+          spread: 90,
+          origin: { y: 0.6 },
+          colors: ['#6A00F4', '#FFD700', '#FFFFFF']
+        });
+        setShowAchievementModal(false);
+      }
+    } catch (error) {
+      console.error('Erro ao resgatar recompensa:', error);
+    }
+  };
 
   const handleClaimChest = async () => {
     if (!userId || isClaimingChest) return;
@@ -5468,10 +5656,6 @@ const App: React.FC = () => {
         });
         
         setShowChestModal(false);
-        setShowChestNotification(false);
-        
-        // Show success message (could be a toast or another modal, but user asked for "fala parabens")
-        alert('🎉 PARABÉNS! Você ganhou 10 créditos extras! 🎁✨');
       }
     } catch (error) {
       console.error('Erro ao resgatar baú:', error);
@@ -5482,10 +5666,20 @@ const App: React.FC = () => {
 
   const isInitialLoadRef = useRef(true);
 
-  // Preload GIF Guia de Peça
+  // Preload Assets (GIF, VIP Image, Logo, Categories and Carousel)
   useEffect(() => {
-    const img = new Image();
-    img.src = "https://i.postimg.cc/yxjyGXLW/202603181804-ezgif-com-video-to-gif-converter.gif";
+    const assets = [
+      "https://i.postimg.cc/yxjyGXLW/202603181804-ezgif-com-video-to-gif-converter.gif",
+      "https://i.postimg.cc/GhLVXkhh/Untitled-design-(5).jpg",
+      "https://i.postimg.cc/G2DYHjrv/P-(1).png",
+      ...CATEGORIES.map(cat => cat.image),
+      ...HOME_CAROUSEL_1
+    ];
+
+    assets.forEach(src => {
+      const img = new Image();
+      img.src = src;
+    });
   }, []);
 
   useEffect(() => {
@@ -5539,9 +5733,12 @@ const App: React.FC = () => {
               subscriptionStartDate: userData.subscriptionStartDate || null,
               creditsReleased: userData.creditsReleased || 0,
               totalPhotosGenerated: userData.totalPhotosGenerated || 0,
+              profileImage: userData.profileImage || null,
               dailyUsage: userData.dailyUsage || null,
               rechargeCount: userData.rechargeCount || 0,
               badge: userData.badge || null,
+              goldRewardClaimed: userData.goldRewardClaimed || false,
+              diamondRewardClaimed: userData.diamondRewardClaimed || false,
               pendingCredits: userData.pendingCredits || 0,
               closetLimit: userData.closetLimit || 10,
               streak: userData.streak ?? 0,
@@ -5797,9 +5994,63 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSplashFinish = () => {
-    setScreen(Screen.LOGIN);
-  };
+const handleProfessionalShare = async (before: string, after: string) => {
+  if (!userId) return;
+  setIsSharing(true);
+  try {
+    // Usa a imagem gerada diretamente (base64 do userState)
+    const imagemGerada = userState.generatedImage || after;
+    if (!imagemGerada) throw new Error('Sem imagem');
+
+    // 1. Tenta o compartilhamento nativo (enviar o arquivo da foto diretamente)
+    // Isso funciona na maioria dos celulares e remove a necessidade de links
+    try {
+      const response = await fetch(imagemGerada);
+      const blob = await response.blob();
+      const file = new File([blob], 'meu-look-pandora.jpg', { type: 'image/jpeg' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Pandora AI',
+          text: 'Olha que incrível como essa peça ficou em mim! ✨👗'
+        });
+        setIsSharing(false);
+        return;
+      }
+    } catch (shareError) {
+      console.log('Compartilhamento nativo não disponível ou falhou, usando link de fallback...');
+    }
+
+    // 2. Fallback para o link (necessário para Desktop/WhatsApp Web que não suportam envio de arquivos via API)
+    const shareId = Math.random().toString(36).substring(2, 10);
+    const { doc: firestoreDoc, setDoc: firestoreSetDoc } = await import('firebase/firestore');
+    await firestoreSetDoc(firestoreDoc(db, 'shares', shareId), {
+      imageBase64: imagemGerada,
+      createdAt: new Date().toISOString(),
+      userId
+    });
+
+    // Usa a URL atual do app dinamicamente
+    const serverUrl = window.location.origin;
+    const shareLink = serverUrl + '/share?id=' + shareId;
+
+    // Abre WhatsApp com o link (o WhatsApp gerará a miniatura da foto automaticamente)
+    const text = encodeURIComponent('Olha que incrível como essa peça ficou em mim! ✨👗\n\n' + shareLink);
+    window.open('https://wa.me/?text=' + text, '_blank');
+
+  } catch (error) {
+    console.error('Erro ao compartilhar:', error);
+    const text = encodeURIComponent('Experimentei o Pandora AI! ✨ https://pandoraquizai.netlify.app/');
+    window.open('https://wa.me/?text=' + text, '_blank');
+  } finally {
+    setIsSharing(false);
+  }
+};
+
+  const handleSplashFinish = useCallback(() => {
+    setScreen(prev => prev === Screen.SPLASH ? Screen.LOGIN : prev);
+  }, []);
 
   const handleLogin = async (email: string, userIdFromLogin: string) => {
     const userEmail = email.toLowerCase().trim();
@@ -5877,7 +6128,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateProfile = (name: string, image: string | null, cellphone?: string, taxId?: string) => {
+  const handleUpdateProfile = async (name: string, image: string | null, cellphone?: string, taxId?: string) => {
+    console.log('📤 Updating profile for UID:', userId, { name, hasImage: !!image });
+    
     setUserState(prev => ({ 
       ...prev, 
       name, 
@@ -5885,6 +6138,34 @@ const App: React.FC = () => {
       cellphone: cellphone || prev.cellphone,
       taxId: taxId || prev.taxId 
     }));
+
+    if (userId) {
+      try {
+        const userRef = doc(db, 'users', userId);
+        const updateData: any = {
+          nome: name,
+          name: name,
+          cellphone: cellphone || userState.cellphone,
+          taxId: taxId || userState.taxId
+        };
+
+        if (image) {
+          // Se for uma nova imagem (base64), comprime antes de salvar
+          if (image.startsWith('data:image')) {
+            console.log('🖼️ Compressing new profile image...');
+            const compressed = await compressImage(image, 400, 400, 0.7);
+            updateData.profileImage = compressed;
+          } else {
+            updateData.profileImage = image;
+          }
+        }
+
+        await updateDoc(userRef, updateData);
+        console.log('✅ Perfil atualizado com sucesso no Firestore');
+      } catch (error) {
+        console.error('❌ Erro ao atualizar perfil no Firestore:', error);
+      }
+    }
   };
 
   const handleHomeUpload = (url: string) => {
@@ -5989,6 +6270,8 @@ const App: React.FC = () => {
   };
 
   const handleUnlockCloset = async () => {
+    if (isUnlockingCloset) return;
+    
     if (userState.credits < 20) {
       alert('❌ Você não tem créditos suficientes para liberar espaço! Recarregue agora.');
       setScreen(Screen.CREDITS);
@@ -5996,16 +6279,29 @@ const App: React.FC = () => {
       return;
     }
 
-    const ok = await unlockClosetSpace(userId);
-    if (ok) {
-      alert('✅ Espaço liberado! Você agora tem +10 slots no seu Closet Virtual.');
-      setShowClosetLimitModal(false);
-      if (pendingClothingImageUrl) {
-        handleGenerateLook(pendingClothingImageUrl);
-        setPendingClothingImageUrl(null);
+    setIsUnlockingCloset(true);
+    try {
+      const ok = await unlockClosetSpace(userId);
+      if (ok) {
+        // Atualiza o estado local imediatamente para evitar que o modal reapareça no handleGenerateLook
+        setUserState(prev => ({
+          ...prev,
+          credits: prev.credits - 20,
+          closetLimit: (prev.closetLimit || 10) + 10
+        }));
+
+        // Fecha o modal IMEDIATAMENTE antes de qualquer outra ação
+        setShowClosetLimitModal(false);
+        
+        if (pendingClothingImageUrl) {
+          handleGenerateLook(pendingClothingImageUrl);
+          setPendingClothingImageUrl(null);
+        }
+      } else {
+        alert('Erro ao liberar espaço. Tente novamente.');
       }
-    } else {
-      alert('Erro ao liberar espaço. Tente novamente.');
+    } finally {
+      setIsUnlockingCloset(false);
     }
   };
 
@@ -6175,11 +6471,8 @@ const App: React.FC = () => {
 
       // Atualiza estatísticas de gamificação
       if (userId) {
-        const today = new Date().toISOString().split('T')[0];
         // totalPhotosGenerated já é incrementado no deductCredit
         const currentTotalPhotos = userState.totalPhotosGenerated || 0;
-        const currentDailyUsage = userState.dailyUsage?.date === today ? userState.dailyUsage.count : 0;
-        const newDailyUsage = currentDailyUsage + 10;
         
         // Define o badge baseado no total de fotos
         let newBadge = userState.badge;
@@ -6188,25 +6481,18 @@ const App: React.FC = () => {
         else if (currentTotalPhotos >= 40) newBadge = 'silver';
         else if (currentTotalPhotos >= 20) newBadge = 'bronze';
 
-        // Verifica se subiu de nível para Ouro ou Diamante
+        // Verifica se subiu de nível
         if (newBadge !== userState.badge) {
-          if (newBadge === 'gold') {
-            setAchievedBadge('gold');
-            setShowAchievementModal(true);
-          } else if (newBadge === 'diamond') {
-            setAchievedBadge('diamond');
-            setShowAchievementModal(true);
-          }
+          setAchievedBadge(newBadge as any);
+          setShowAchievementModal(true);
         }
 
         try {
           await updateDoc(doc(db, 'users', userId), {
-            dailyUsage: { date: today, count: newDailyUsage, claimedChest: userState.dailyUsage?.claimedChest || false },
             badge: newBadge
           });
           setUserState(prev => ({ 
             ...prev, 
-            dailyUsage: { date: today, count: newDailyUsage, claimedChest: prev.dailyUsage?.claimedChest || false },
             badge: newBadge as any
           }));
         } catch (err) {
@@ -6868,8 +7154,7 @@ const App: React.FC = () => {
                 setUserId={setUserId}
                 setScreen={setScreen}
                 isAdmin={isAdmin}
-                showChestNotification={showChestNotification}
-                setShowChestNotification={setShowChestNotification}
+                onBadgeClick={handleBadgeClick}
             />
         );
         onBack = handleBackToHome;
@@ -6924,6 +7209,8 @@ const App: React.FC = () => {
             userState={userState}
             aspectRatio={aspectRatio}
             setAspectRatio={setAspectRatio}
+            onProfessionalShare={handleProfessionalShare}
+            isSharing={isSharing}
           />
         );
         onBack = () => setScreen(Screen.FINALIZE);
@@ -6991,6 +7278,8 @@ const App: React.FC = () => {
           styleTags={userState.styleTags}
           chestReady={isChestReady}
           onOpenChest={() => setShowChestModal(true)}
+          showVipGroupModal={showVipGroupModal}
+          setShowVipGroupModal={setShowVipGroupModal}
         >
           {content}
         </MainLayout>
@@ -7237,7 +7526,7 @@ const App: React.FC = () => {
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-2xl text-center relative overflow-hidden"
             >
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-400 to-purple-500"></div>
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-purple-400 to-purple-600"></div>
               
               <button 
                 onClick={() => setShowClosetLimitModal(false)}
@@ -7246,7 +7535,7 @@ const App: React.FC = () => {
                 <X size={24} />
               </button>
 
-              <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mx-auto mb-6">
+              <div className="w-20 h-20 bg-purple-50 rounded-full flex items-center justify-center text-purple-600 mx-auto mb-6">
                 <Box size={40} />
               </div>
 
@@ -7259,7 +7548,7 @@ const App: React.FC = () => {
               <div className="bg-gray-50 rounded-2xl p-4 mb-8 flex items-center justify-between">
                 <div className="text-left">
                   <p className="text-[10px] text-gray-400 uppercase font-bold">Custo</p>
-                  <p className="text-lg font-bold text-blue-600">20 Créditos</p>
+                  <p className="text-lg font-bold text-purple-600">20 Créditos</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] text-gray-400 uppercase font-bold">Seu Saldo</p>
@@ -7270,9 +7559,15 @@ const App: React.FC = () => {
               <div className="flex flex-col gap-3">
                 <Button 
                   onClick={handleUnlockCloset}
-                  className="w-full bg-gradient-to-r from-blue-600 to-blue-500 shadow-lg shadow-blue-200"
+                  disabled={isUnlockingCloset}
+                  className="w-full bg-gradient-to-r from-purple-600 to-purple-500 shadow-lg shadow-purple-200"
                 >
-                  <Zap size={18} /> Liberar Espaço Agora
+                  {isUnlockingCloset ? (
+                    <Loader2 className="animate-spin mr-2" size={18} />
+                  ) : (
+                    <Zap size={18} />
+                  )}
+                  {isUnlockingCloset ? 'Processando...' : 'Liberar Espaço Agora'}
                 </Button>
                 <button 
                   onClick={() => setShowClosetLimitModal(false)}
@@ -7312,7 +7607,7 @@ const App: React.FC = () => {
               </h2>
               
               <p className="text-gray-500 text-sm mb-8 leading-relaxed">
-                Você usou 30 créditos hoje e liberou um presente especial! Toque no baú para resgatar.
+                Você usou 50 créditos hoje e liberou um presente especial! Toque no baú para resgatar.
               </p>
 
               <Button 
@@ -7345,7 +7640,7 @@ const App: React.FC = () => {
               <div className="relative z-10">
                 <div className="w-24 h-24 mx-auto mb-6 relative">
                   <div className="absolute inset-0 bg-yellow-400 rounded-full animate-ping opacity-20"></div>
-                  <div className={`w-full h-full rounded-full flex items-center justify-center text-white shadow-xl ${achievedBadge === 'diamond' ? 'bg-gradient-to-br from-blue-400 to-indigo-600' : 'bg-gradient-to-br from-yellow-400 to-orange-500'}`}>
+                  <div className={`w-full h-full rounded-full flex items-center justify-center text-white shadow-xl ${achievedBadge === 'diamond' ? 'bg-gradient-to-br from-purple-400 to-purple-800' : 'bg-gradient-to-br from-yellow-400 to-orange-500'}`}>
                     {achievedBadge === 'diamond' ? <Trophy size={48} /> : <Star size={48} fill="currentColor" />}
                   </div>
                 </div>
@@ -7354,58 +7649,81 @@ const App: React.FC = () => {
                   PARABÉNS! 🎉
                 </h2>
                 
-                <p className="text-lg font-bold text-purple-600 mb-4">
-                  Você agora é nível {achievedBadge === 'diamond' ? 'DIAMANTE' : 'OURO'}!
+                <p className="text-lg font-bold text-purple-600 mb-4 uppercase">
+                  Você agora é nível {achievedBadge}!
                 </p>
 
                 <div className="bg-purple-50 rounded-2xl p-4 mb-8">
                   <p className="text-gray-600 text-sm leading-relaxed">
-                    {achievedBadge === 'diamond' ? 
-                      "Incrível! Você atingiu o topo da nossa comunidade. Sua jornada de estilo é uma inspiração para todos! 💎✨" : 
-                      "Uau! Você está brilhando! Seu senso de estilo evoluiu e agora você faz parte da nossa elite Gold! 🌟🚀"
-                    }
+                    {achievedBadge === 'bronze' && "Parabéns você chegou no Bronze! Falta pouco para você se tornar Prata. Continue explorando seu estilo! 🥉✨"}
+                    {achievedBadge === 'silver' && "Uau! Você é Prata! Você está quase chegando em Ouro, onde ganhará 50 créditos. Continue, está quase lá! 🥈🚀"}
+                    {achievedBadge === 'gold' && "Parabéns pelo Ouro! Você brilhou intensamente e agora faz parte da nossa elite. Você ganhou 50 créditos! 🥇💰"}
+                    {achievedBadge === 'diamond' && "Que incrível! Você chegou ao topo! É muito difícil alguém chegar aqui, você é uma verdadeira lenda do estilo. Você ganhou 200 créditos! 💎👑"}
                   </p>
                 </div>
 
-                <Button 
-                  onClick={() => setShowAchievementModal(false)}
-                  className={`w-full py-4 text-lg font-black shadow-lg ${achievedBadge === 'diamond' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-yellow-500 shadow-yellow-200'}`}
-                >
-                  CONTINUAR BRILHANDO
-                </Button>
+                {(achievedBadge === 'gold' || achievedBadge === 'diamond') ? (
+                  <Button 
+                    onClick={handleClaimReward}
+                    className="w-full py-4 text-lg font-black bg-gradient-to-r from-yellow-400 to-orange-500 shadow-lg shadow-yellow-200"
+                  >
+                    RESGATAR {achievedBadge === 'gold' ? '50' : '200'} CRÉDITOS ⚡
+                  </Button>
+                ) : (
+                  <Button 
+                    onClick={() => setShowAchievementModal(false)}
+                    className="w-full py-4 text-lg font-black bg-purple-600 shadow-lg shadow-purple-200"
+                  >
+                    CONTINUAR BRILHANDO
+                  </Button>
+                )}
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Chest Notification */}
+      {/* Badge Status Modal */}
       <AnimatePresence>
-        {showChestNotification && (
-          <motion.div
-            initial={{ y: -100, opacity: 0 }}
-            animate={{ y: 20, opacity: 1 }}
-            exit={{ y: -100, opacity: 0 }}
-            className="fixed top-0 left-0 right-0 z-[100] flex justify-center px-4"
-          >
-            <button
-              onClick={() => {
-                setShowChestModal(true);
-              }}
-              className="bg-purple-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border-2 border-white/20 backdrop-blur-md"
+        {showBadgeStatusModal && (
+          <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-md flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[32px] p-8 w-full max-w-xs shadow-2xl text-center relative"
             >
-              <div className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-purple-900 animate-bounce">
-                <Archive size={18} />
+              <button 
+                onClick={() => setShowBadgeStatusModal(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 mx-auto mb-4">
+                <Trophy size={32} />
               </div>
-              <div className="text-left">
-                <p className="text-xs font-bold">Seu Baú está disponível! 🎁</p>
-                <p className="text-[10px] opacity-80">Toque aqui para resgatar seus 10 créditos.</p>
-              </div>
-              <ArrowRight size={16} />
-            </button>
-          </motion.div>
+
+              <h3 className="text-xl font-black text-[#2E0249] mb-3 tracking-tight">
+                {badgeStatusMessage.title}
+              </h3>
+              
+              <p className="text-gray-600 text-sm leading-relaxed mb-6">
+                {badgeStatusMessage.text}
+              </p>
+
+              <Button 
+                onClick={() => setShowBadgeStatusModal(false)}
+                className="w-full py-3 text-sm font-bold bg-purple-600"
+              >
+                ENTENDI
+              </Button>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
+
+      {/* Chest Notification - REMOVED */}
     </ErrorBoundary>
   );
 };
