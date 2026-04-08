@@ -10,7 +10,6 @@ export enum Screen {
   VIEW_360 = 'VIEW_360',
   RESULT_360 = 'RESULT_360',
   CREDITS = 'CREDITS',
-  SUCCESS = 'SUCCESS',
   NO_REGISTRATION = 'NO_REGISTRATION',
   FAQ = 'FAQ',
   CADASTRO = 'CADASTRO',
@@ -69,6 +68,8 @@ export interface UserState {
   badge?: 'bronze' | 'silver' | 'gold' | 'diamond' | null;
   pendingCredits?: number;
   loyaltyBonusClaimed?: boolean;
+  closetLimit?: number;
+  createdAt?: string | null;
 }
 
 export interface CategoryItem {

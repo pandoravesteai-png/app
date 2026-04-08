@@ -2,9 +2,9 @@ import { GoogleGenAI } from "@google/genai";
 
 // Initialize Gemini AI
 const getAiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.API_KEY;
     if (!apiKey) {
-        console.warn("GEMINI_API_KEY not found.");
+        console.warn("API Key not found.");
         return null;
     }
     return new GoogleGenAI({ apiKey });
@@ -19,7 +19,7 @@ export const generateFashionTip = async (prompt: string): Promise<string> => {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: `Você é um assistente de moda especialista da Pandora AI. Responda de forma curta, estilosa e encorajadora em português. Pergunta: ${prompt}`,
     });
     
@@ -36,7 +36,7 @@ export const extractStyleTags = async (imageBase64: string): Promise<string[]> =
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: [
         {
           inlineData: {
@@ -64,7 +64,7 @@ export const generateCompliment = async (clothingImageBase64: string): Promise<s
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: [
         {
           inlineData: {
@@ -109,8 +109,33 @@ export const generateTryOnLook = async (
   category: string
 ): Promise<string | null> => {
   try {
+    console.log('🚀 [Try-On] Preparando chamada para Cloud Function...');
+    console.log('DEBUG [geminiService] generateTryOnLook args:', {
+      userImageLen: userImageBase64?.length,
+      clothingImageLen: clothingImageBase64?.length,
+      userImageType: typeof userImageBase64,
+      clothingImageType: typeof clothingImageBase64,
+      category
+    });
+
+    if (!userImageBase64 || userImageBase64.length < 100) {
+      console.error('❌ [Try-On] Imagem do usuário inválida ou muito curta:', userImageBase64?.length);
+      throw new Error("A sua foto é obrigatória e não foi processada corretamente.");
+    }
+
+    if (!clothingImageBase64 || clothingImageBase64.length < 100) {
+      console.error('❌ [Try-On] Imagem da roupa inválida ou muito curta:', clothingImageBase64?.length);
+      throw new Error("A imagem da roupa é obrigatória e não foi processada corretamente.");
+    }
+
     const gerarTryOn = httpsCallable(functions, 'gerarTryOn', { timeout: 180000 }); // Aumentado para 180s (3 min)
     
+    console.log('📤 [Try-On] Chamando Cloud Function com:', {
+      userLen: userImageBase64.length,
+      clothingLen: clothingImageBase64.length,
+      category
+    });
+
     const result = await gerarTryOn({
       urlFotoCliente: userImageBase64,
       urlFotoRoupa: clothingImageBase64,

@@ -7,6 +7,7 @@ export const getOrCreateUserCredits = async (
   const userRef = doc(db, 'users', userId);
   try {
     const userSnap = await getDoc(userRef);
+    console.log('🔍 Credits for user:', userId, 'Data:', userSnap.data());
     if (!userSnap.exists()) {
       const email = auth.currentUser?.email || '';
       await setDoc(userRef, { 
@@ -136,42 +137,32 @@ export const processCreditRelease = async (userId: string): Promise<void> => {
     // Check for badges based on totalPhotosGenerated
     const photos = data.totalPhotosGenerated || 0;
     let newBadge = data.badge;
-    if (photos >= 100) newBadge = 'diamond';
-    else if (photos >= 60) newBadge = 'gold';
-    else if (photos >= 40) newBadge = 'silver';
-    else if (photos >= 20) newBadge = 'bronze';
+    let creditsToAdd = 0;
+    
+    if (photos >= 100) {
+      newBadge = 'diamond';
+      if (!data.diamondRewardClaimed) creditsToAdd = 200;
+    } else if (photos >= 60) {
+      newBadge = 'gold';
+      if (!data.goldRewardClaimed && data.badge !== 'diamond') creditsToAdd = 50;
+    } else if (photos >= 40) {
+      newBadge = 'silver';
+    } else if (photos >= 20) {
+      newBadge = 'bronze';
+    }
 
-    if (newBadge !== data.badge) {
-      await updateDoc(userRef, { badge: newBadge });
+    if (newBadge !== data.badge || creditsToAdd > 0) {
+      const badgeUpdates: any = { badge: newBadge };
+      if (creditsToAdd > 0) {
+        badgeUpdates.credits = increment(creditsToAdd);
+        if (newBadge === 'diamond' || data.badge === 'diamond') badgeUpdates.diamondRewardClaimed = true;
+        else if (newBadge === 'gold' || data.badge === 'gold') badgeUpdates.goldRewardClaimed = true;
+      }
+      await updateDoc(userRef, badgeUpdates);
     }
 
   } catch (error) {
     console.error('Erro ao processar liberação de créditos:', error);
-  }
-};
-
-export const spinRoulette = async (userId: string): Promise<number> => {
-  const userRef = doc(db, 'users', userId);
-  try {
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) return 0;
-    
-    const data = userSnap.data();
-    const today = new Date().toISOString().split('T')[0];
-    if (data.lastRouletteSpin === today) return 0;
-
-    // Random credits between 1 and 10
-    const win = Math.floor(Math.random() * 10) + 1;
-    
-    await updateDoc(userRef, {
-      credits: increment(win),
-      lastRouletteSpin: today
-    });
-    
-    return win;
-  } catch (error) {
-    console.error('Erro ao girar roleta:', error);
-    return 0;
   }
 };
 
@@ -197,6 +188,28 @@ export const claimChest = async (userId: string): Promise<number> => {
   } catch (error) {
     console.error('Erro ao resgatar baú:', error);
     return 0;
+  }
+};
+
+export const unlockClosetSpace = async (userId: string): Promise<boolean> => {
+  const userRef = doc(db, 'users', userId);
+  try {
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) return false;
+    
+    const data = userSnap.data();
+    const currentCredits = data.credits ?? 0;
+    
+    if (currentCredits < 20) return false;
+    
+    await updateDoc(userRef, {
+      credits: increment(-20),
+      closetLimit: increment(10)
+    });
+    return true;
+  } catch (error) {
+    console.error('Erro ao desbloquear espaço no closet:', error);
+    return false;
   }
 };
 
@@ -256,24 +269,8 @@ export const purchasePremium = async (userId: string): Promise<void> => {
 };
 
 export const listenToUser = (userId: string, callback: (data: any) => void) => {
-  console.log('👂 Starting listener for UserID:', userId);
   const userRef = doc(db, 'users', userId);
   return onSnapshot(userRef, (snap) => {
-    if (snap.exists()) {
-      console.log('📡 Snapshot received for UserID:', userId, 'Exists: true');
-      callback(snap.data());
-    } else {
-      console.log('📡 Snapshot received for UserID:', userId, 'Exists: false - Sending default data');
-      // Envia dados padrão se o documento não existir
-      callback({
-        credits: 10,
-        subscriptionTier: 'basic',
-        nome: 'Usuário',
-        email: auth.currentUser?.email || ''
-      });
-    }
-  }, (error) => {
-    console.error('❌ Firestore Listener Error for UserID:', userId, error);
-    handleFirestoreError(error, OperationType.GET, `users/${userId}`);
+    callback(snap.exists() ? snap.data() : null);
   });
 };

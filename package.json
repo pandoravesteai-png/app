@@ -12,6 +12,7 @@
   "dependencies": {
     "@google/genai": "^1.41.0",
     "@tailwindcss/vite": "^4.2.1",
+    "canvas-confetti": "^1.9.4",
     "express": "^5.2.1",
     "firebase": "^12.10.0",
     "lucide-react": "^0.563.0",
@@ -23,6 +24,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",

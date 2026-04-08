@@ -10,50 +10,35 @@ service cloud.firestore {
       return isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email != null && request.auth.token.email.lower() == userId.lower()));
     }
 
-    function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "pandoravesteai@gmail.com" && request.auth.token.email_verified == true));
-    }
-
     match /users/{userId} {
-      // Permite ler se estiver autenticado (necessário para a query de migração por email)
-      allow read: if isAuthenticated();
+      // Allow full access to own document
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
       
-      // Permite criar se for o próprio UID, se for admin, ou se o email bater (migração)
-      allow create: if isAuthenticated() && 
-                     (request.auth.uid == userId || 
-                      isAdmin() || 
-                      (request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()));
-      
-      // Permite atualizar ou deletar se for o dono, admin, ou se o documento pertencer ao email do usuário (migração)
-      allow update, delete: if isAuthenticated() && 
-                             (isOwner(userId) || 
-                              isAdmin() || 
-                              (resource != null && resource.data.email != null && resource.data.email.lower() == request.auth.token.email.lower()));
+      // Allow listing documents if filtering by own email
+      allow list: if isAuthenticated() && 
+                    request.auth.token.email != null && 
+                    request.query.filters.email == request.auth.token.email.lower();
+
+      // Allow reading and deleting orphaned documents with the same email
+      allow get, delete: if isAuthenticated() && 
+                            request.auth.token.email != null && 
+                            (resource.data.get('email', '').lower() == request.auth.token.email.lower());
       
       match /{subcollection}/{docId} {
-        allow read: if isAuthenticated();
-        allow write: if isOwner(userId) || isAdmin();
+        allow read, write: if isAuthenticated() && (
+          request.auth.uid == userId || 
+          (request.auth.token.email != null && get(/databases/$(database)/documents/users/$(userId)).data.get('email', '').lower() == request.auth.token.email.lower())
+        );
       }
     }
 
     match /avaliacoes/{docId} {
       allow read, create: if isAuthenticated();
-      allow update, delete: if isAdmin();
+      allow update, delete: if false;
     }
 
     match /historico/{docId} {
       allow read, write: if isAuthenticated();
-    }
-
-    match /api_usage/{docId} {
-      allow read, write: if isAdmin();
-    }
-    
-    match /transactions/{docId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();
     }
   }
 }

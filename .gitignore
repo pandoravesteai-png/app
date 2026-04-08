@@ -1,7 +1,7 @@
 # Environment variables
 .env
 .env.local
-
+firebase-applet-config.json
 .env.*.local
 
 # Logs

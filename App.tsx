@@ -3,9 +3,10 @@ import { useState, useEffect, useRef, Component, useMemo } from 'react';
 import { processCreditRelease } from './services/creditsService';
 import { Screen, UserState, ClothingType, HistoryItem } from './types';
 import { AppLogo, Button, Input } from './components/UI';
-import { CATEGORIES, HOME_CAROUSEL_1, HOME_CAROUSEL_2 } from './constants';
-import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle, HelpCircle, Star, User, ShoppingBag, ChevronRight, Terminal, Trophy, Gift, RotateCw } from 'lucide-react';
+import { CATEGORIES, HOME_CAROUSEL_1 } from './constants';
+import { Mail, Lock, Upload, Image as ImageIcon, Camera as CameraIcon, Check, ArrowRight, RefreshCw, Eye, Sparkles, Zap, Trash2, Download, RefreshCcw, Box, Rotate3d, Home, ArrowLeft, Plus, Wallet, Info, ShieldCheck, AlertTriangle, X, ChevronDown, ChevronUp, Pencil, Save, ExternalLink, UserX, ZoomIn, Move, Instagram, MessageCircle, HelpCircle, Star, User, ShoppingBag, ChevronRight, Terminal, Trophy, Gift, RotateCw, Archive } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import confetti from 'canvas-confetti';
 import { GoogleGenAI } from "@google/genai";
 import { doc, updateDoc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, deleteDoc, increment } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
@@ -22,9 +23,25 @@ import {
 } from 'firebase/auth';
 import { generateFashionTip, generateTryOnLook, generate360View, extractStyleTags, generateCompliment } from './services/geminiService';
 import { loginWithGoogle, loginWithEmail, deleteCurrentUser, googleProvider, requestNotificationPermission } from './services/firebase';
-import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail, purchasePremium, spinRoulette, claimChest } from './services/creditsService';
+import { getOrCreateUserCredits, deductCredit, addCredits, listenToUser, saveUserEmail, purchasePremium, claimChest, unlockClosetSpace } from './services/creditsService';
 import { createPixPayment } from './services/paymentService';
 
+
+// --- Helper functions ---
+const parseFirebaseDate = (date: any): Date | null => {
+  if (!date) return null;
+  if (date instanceof Date) return date;
+  if (typeof date === 'string') {
+    const d = new Date(date);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  // Handle Firestore Timestamp
+  if (date && typeof date === 'object') {
+    if (typeof date.toDate === 'function') return date.toDate();
+    if (date.seconds !== undefined) return new Date(date.seconds * 1000);
+  }
+  return null;
+};
 
 // --- Stylist Tips Generator ---
 const getStylistTip = (category: string): string => {
@@ -63,38 +80,6 @@ const getStylistTip = (category: string): string => {
 
   const categoryTips = tips[category] || tips['default'];
   return categoryTips[Math.floor(Math.random() * categoryTips.length)];
-};
-
-// --- Celebrity Style Tips ---
-const getCelebrityTip = (style: string): { celebrity: string, tip: string } => {
-  const tips: Record<string, { celebrity: string, tip: string }[]> = {
-    'Minimalista': [
-      { celebrity: "Victoria Beckham", tip: "O menos é sempre mais. Foque em cortes impecáveis e cores neutras para um ar de sofisticação instantânea." },
-      { celebrity: "Angelina Jolie", tip: "Invista em peças atemporais. Um bom trench coat ou um vestido preto simples são a base de qualquer guarda-roupa elegante." }
-    ],
-    'Boho': [
-      { celebrity: "Vanessa Hudgens", tip: "Não tenha medo de misturar texturas e estampas. O segredo do boho é parecer despojado, mas com intenção." },
-      { celebrity: "Sienna Miller", tip: "Acessórios são tudo. Chapéus, franjas e camadas de colares transformam qualquer look básico em boho chic." }
-    ],
-    'Executivo': [
-      { celebrity: "Amal Clooney", tip: "O poder está no caimento. Um blazer bem estruturado comunica autoridade e elegância em qualquer ambiente." },
-      { celebrity: "Meghan Markle", tip: "Monocromático é o segredo da sofisticação. Tons sobre tons criam uma silhueta alongada e profissional." }
-    ],
-    'Streetwear': [
-      { celebrity: "Rihanna", tip: "Conforto e atitude devem andar juntos. Misture peças oversized com acessórios de luxo para o contraste perfeito." },
-      { celebrity: "Hailey Bieber", tip: "O tênis certo muda tudo. Use peças esportivas com jaquetas de couro ou blazers para um look urbano moderno." }
-    ],
-    'Romântico': [
-      { celebrity: "Taylor Swift", tip: "Cores pastéis e estampas florais nunca saem de moda. Detalhes como rendas e babados trazem feminilidade ao look." },
-      { celebrity: "Elle Fanning", tip: "Tecidos leves e fluidos criam um ar etéreo. Aposte em silhuetas que valorizem a delicadeza." }
-    ],
-    'default': [
-      { celebrity: "Gisele Bündchen", tip: "O melhor acessório é a sua confiança. Vista o que te faz sentir bem e o resto virá naturalmente." }
-    ]
-  };
-
-  const styleTips = tips[style] || tips['default'];
-  return styleTips[Math.floor(Math.random() * styleTips.length)];
 };
 
 // --- Style Quiz Screen ---
@@ -307,7 +292,6 @@ const NoRegistrationScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
   const [currentSlide, setCurrentSlide] = useState(0);
   
-  if (isPremium) return null;
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % 5);
 
   const slides = [
@@ -418,11 +402,14 @@ const PromoCarousel: React.FC<{ isPremium?: boolean }> = ({ isPremium }) => {
   ];
 
   useEffect(() => {
+    if (isPremium) return;
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % slides.length);
     }, 5000); // Increased duration for reading
     return () => clearInterval(timer);
-  }, [slides.length]);
+  }, [slides.length, isPremium]);
+
+  if (isPremium) return null;
 
   return (
     <div className="w-full h-56 relative">
@@ -483,19 +470,25 @@ const compressImage = (base64Str: string, maxWidth = 800, maxHeight = 800, quali
     }
 
     // Se for uma URL curta (não base64 e não blob), não precisa comprimir
-    if (base64Str.length < 1000 && !base64Str.startsWith('data:image') && !base64Str.startsWith('blob:')) {
+    if ((base64Str.length < 1000 || base64Str.startsWith('http')) && !base64Str.startsWith('data:image') && !base64Str.startsWith('blob:')) {
       resolve(base64Str);
       return;
     }
 
     let src = base64Str;
-    if (!src.startsWith('data:image') && !src.startsWith('blob:')) {
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      // É uma URL remota, não adicionamos prefixo base64
+    } else if (!src.startsWith('data:image') && !src.startsWith('blob:')) {
       // Assume que é uma string base64 sem prefixo
       src = `data:image/jpeg;base64,${base64Str}`;
     }
 
     const img = new Image();
     img.src = src;
+    img.onerror = () => {
+      console.error("Error loading image for compression");
+      resolve(base64Str);
+    };
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let width = img.width;
@@ -1241,7 +1234,8 @@ const LoginScreen: React.FC<{
   setUserState: React.Dispatch<React.SetStateAction<UserState>>;
   setScreen: (screen: Screen) => void;
   setShowSuccessModal: (show: boolean) => void;
-}> = ({ onLogin, onNoRegistration, setUserId, setUserState, setScreen, setShowSuccessModal }) => {
+  setIsFirstLogin: (val: boolean) => void;
+}> = ({ onLogin, onNoRegistration, setUserId, setUserState, setScreen, setShowSuccessModal, setIsFirstLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -1296,9 +1290,14 @@ const LoginScreen: React.FC<{
       setUserState(prev => ({ 
         ...prev, 
         email: userEmail,
-        name: name
+        name: name,
+        credits: 10
       }));
-      setScreen(Screen.ONBOARDING);
+      
+      // Marca guia como visto para ir direto
+      localStorage.setItem(`guia_visto_${user.uid}`, 'true');
+      setIsFirstLogin(false);
+      setScreen(Screen.MAIN);
 
       // Busca/cria dados no Firestore em segundo plano
       const userRef = doc(db, 'users', user.uid);
@@ -1333,7 +1332,10 @@ const LoginScreen: React.FC<{
       setUserId(user.uid);
       await saveUserEmail(user.uid, emailLower);
       
-      setScreen(Screen.ONBOARDING);
+      // Marca guia como visto para ir direto
+      localStorage.setItem(`guia_visto_${user.uid}`, 'true');
+      setIsFirstLogin(false);
+      setScreen(Screen.MAIN);
       
     } catch (error: any) {
       console.error('Erro no login:', error);
@@ -1366,37 +1368,45 @@ const LoginScreen: React.FC<{
     try {
       const emailLower = email.toLowerCase().trim();
       
-      // Cria nova conta
-      await createUserWithEmailAndPassword(auth, emailLower, password);
-      
-      // Envia email de boas-vindas
+      let user;
       try {
-        await fetch('https://us-central1-pandora-ai-7c070.cloudfunctions.net/enviarEmailBoasVindas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: emailLower })
-        });
-        console.log('✅ Email de boas-vindas enviado');
-      } catch (emailError) {
-        console.log('⚠️ Erro ao enviar email:', emailError);
+        // Tenta criar nova conta
+        const result = await createUserWithEmailAndPassword(auth, emailLower, password);
+        user = result.user;
+        
+        // Cria documento no Firestore
+        if (user) {
+          setUserId(user.uid);
+          await saveUserEmail(user.uid, emailLower);
+          await getOrCreateUserCredits(user.uid);
+        }
+      } catch (error: any) {
+        // Se o email já estiver em uso, tenta fazer login automaticamente com a mesma senha
+        if (error.code === 'auth/email-already-in-use') {
+          console.log('Email já em uso no handleSignUp, tentando login automático...');
+          const loginResult = await signInWithEmailAndPassword(auth, emailLower, password);
+          user = loginResult.user;
+          if (user) {
+            setUserId(user.uid);
+            await saveUserEmail(user.uid, emailLower);
+          }
+        } else {
+          throw error;
+        }
       }
       
-      // Cria documento no Firestore
-      const user = auth.currentUser;
       if (user) {
-        setUserId(user.uid);
-        await saveUserEmail(user.uid, emailLower);
-        await getOrCreateUserCredits(user.uid);
+        // Marca guia como visto para ir direto
+        localStorage.setItem(`guia_visto_${user.uid}`, 'true');
+        setIsFirstLogin(false);
+        setScreen(Screen.MAIN);
       }
-      
-      alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVerifique seu email para mais informações.');
-      setScreen(Screen.ONBOARDING);
       
     } catch (error: any) {
       console.error('Erro ao cadastrar:', error);
       
       if (error.code === 'auth/email-already-in-use') {
-        alert('❌ Este email já está cadastrado.\n\nUse "Entrar na Plataforma" para fazer login.\n\nOu clique em "Esqueceu a senha?" para recuperar.');
+        alert('❌ Este email já está cadastrado com outra senha.\n\nUse a tela de login para entrar ou recuperar sua senha.');
       } else if (error.code === 'auth/invalid-email') {
         alert('❌ Email inválido.\n\nDigite um email válido.');
       } else if (error.code === 'auth/weak-password') {
@@ -1523,7 +1533,9 @@ const ProfileScreen: React.FC<{
     isAdmin?: boolean;
     onOpenAdmin?: () => void;
     onSyncCredits?: () => void;
-}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits }) => {
+    showChestNotification?: boolean;
+    setShowChestNotification?: (show: boolean) => void;
+}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits, showChestNotification, setShowChestNotification }) => {
     const [editingName, setEditingName] = useState(false);
     const [showLogoutModal, setShowLogoutModal] = useState(false);
     const [newName, setNewName] = useState(userState.name || '');
@@ -1828,13 +1840,6 @@ const ProfileScreen: React.FC<{
                       </span>
                       <div className="flex gap-2">
                         <button
-                          onClick={onSyncCredits}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold hover:bg-purple-200 transition-colors"
-                          title="Sincronizar créditos de outras contas"
-                        >
-                          <RefreshCw size={14} /> Sincronizar
-                        </button>
-                        <button
                           onClick={() => setEditingName(true)}
                           style={{
                             padding: '6px 12px',
@@ -1869,10 +1874,15 @@ const ProfileScreen: React.FC<{
                       {[
                         { label: 'Bronze', min: 20, color: 'text-orange-600', bg: 'bg-orange-100' },
                         { label: 'Prata', min: 40, color: 'text-gray-400', bg: 'bg-gray-100' },
-                        { label: 'Ouro', min: 60, color: 'text-yellow-600', bg: 'bg-yellow-100' },
-                        { label: 'Diamante', min: 100, color: 'text-blue-500', bg: 'bg-blue-50' }
+                        { label: 'Ouro', min: 60, color: 'text-yellow-600', bg: 'bg-yellow-100', reward: '+50 ⚡' },
+                        { label: 'Diamante', min: 100, color: 'text-blue-500', bg: 'bg-blue-50', reward: '+200 ⚡' }
                       ].map((b, i) => (
-                        <div key={i} className="flex flex-col items-center gap-1">
+                        <div key={i} className="flex flex-col items-center gap-1 relative">
+                          {b.reward && (
+                            <div className="absolute -top-3 -right-2 bg-purple-600 text-white text-[7px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10 animate-pulse whitespace-nowrap">
+                              {b.reward}
+                            </div>
+                          )}
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${userState.totalPhotosGenerated! >= b.min ? b.bg : 'bg-gray-50 opacity-40'}`}>
                             <Star size={18} className={userState.totalPhotosGenerated! >= b.min ? b.color : 'text-gray-300'} fill={userState.totalPhotosGenerated! >= b.min ? 'currentColor' : 'none'} />
                           </div>
@@ -1895,56 +1905,20 @@ const ProfileScreen: React.FC<{
                     </div>
                   </div>
 
-                  {/* Daily Rewards */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Roulette */}
-                    <button 
-                      onClick={async () => {
-                        const today = new Date().toISOString().split('T')[0];
-                        if (userState.lastRouletteSpin === today) {
-                          alert('Você já girou a roleta hoje! Volte amanhã.');
-                          return;
-                        }
-                        const win = await spinRoulette(userId!);
-                        if (win > 0) {
-                          alert(`🎉 Parabéns! Você ganhou ${win} créditos na roleta!`);
-                        }
-                      }}
-                      className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${userState.lastRouletteSpin === new Date().toISOString().split('T')[0] ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-purple-100 hover:border-purple-400 shadow-sm'}`}
-                    >
-                      <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center text-purple-600">
-                        <RotateCw size={20} />
+                  {/* Credit Release Message */}
+                  {userState.subscriptionStartDate && userState.creditsReleased! < (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 30 ? 300 : 120) && (
+                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 mb-4 flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 text-purple-600">
+                        <Sparkles size={16} />
                       </div>
-                      <span className="text-xs font-bold text-[#2E0249]">Roleta Diária</span>
-                      <span className="text-[9px] text-gray-400 uppercase">Gire e Ganhe</span>
-                    </button>
-
-                    {/* Chest */}
-                    <button 
-                      onClick={async () => {
-                        const today = new Date().toISOString().split('T')[0];
-                        if (userState.dailyUsage?.claimedChest) {
-                          alert('Você já resgatou seu bônus de uso hoje! Volte amanhã.');
-                          return;
-                        }
-                        if (userState.dailyUsage?.date === today && userState.dailyUsage.count >= 30) {
-                          const win = await claimChest(userId!);
-                          if (win > 0) {
-                            alert('🎁 Você abriu o baú e ganhou 10 créditos extras!');
-                          }
-                        } else {
-                          alert(`Faltam ${30 - (userState.dailyUsage?.count || 0)} créditos de uso hoje para liberar o baú!`);
-                        }
-                      }}
-                      className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${userState.dailyUsage?.claimedChest ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-pink-100 hover:border-pink-400 shadow-sm'}`}
-                    >
-                      <div className="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center text-pink-600">
-                        <Gift size={20} />
+                      <div>
+                        <p className="text-[11px] font-bold text-purple-900">Novos créditos em breve! ✨</p>
+                        <p className="text-[10px] text-purple-700/80 leading-tight">
+                          Fique de olho! Mais créditos serão liberados automaticamente durante sua jornada nos próximos dias.
+                        </p>
                       </div>
-                      <span className="text-xs font-bold text-[#2E0249]">Baú de Uso</span>
-                      <span className="text-[9px] text-gray-400 uppercase">Use 30 e Ganhe</span>
-                    </button>
-                  </div>
+                    </div>
+                  )}
 
                   {/* Credit Release Timeline */}
                   {userState.subscriptionStartDate && (
@@ -2984,6 +2958,8 @@ const MainLayout: React.FC<{
   onBack?: () => void;
   backIcon?: 'arrow' | 'x';
   styleTags?: string[];
+  chestReady?: boolean;
+  onOpenChest?: () => void;
 }> = ({ 
   children, 
   credits, 
@@ -2994,7 +2970,9 @@ const MainLayout: React.FC<{
   isPremium = false, 
   onBack, 
   backIcon = 'arrow', 
-  styleTags = []
+  styleTags = [],
+  chestReady = false,
+  onOpenChest
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -3109,7 +3087,7 @@ const MainLayout: React.FC<{
             </div>
             <h3 className="text-xl font-bold text-[#2E0249] mb-2">Sistema de Créditos</h3>
             <p className="text-gray-600 text-sm mb-6">
-              Cada geração de look consome 1 crédito. Você pode recarregar seus créditos a qualquer momento para continuar transformando seu estilo!
+              Cada geração de look consome 10 créditos. Você pode recarregar seus créditos a qualquer momento para continuar transformando seu estilo!
             </p>
             <Button onClick={() => { setShowCreditsInfo(false); onOpenCredits(); }}>
               Gerenciar Créditos
@@ -3283,6 +3261,16 @@ const MainLayout: React.FC<{
         </div>
         
         <div className="flex items-center gap-1 md:gap-2">
+          {chestReady && (
+            <button 
+              onClick={onOpenChest}
+              className="w-8 h-8 rounded-full bg-yellow-400 text-purple-900 flex items-center justify-center shadow-lg hover:bg-yellow-300 transition-all active:scale-95 relative animate-bounce"
+            >
+              <Archive size={16} />
+              <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>
+            </button>
+          )}
+
           <button 
             onClick={() => setShowVipGroupModal(true)}
             className="w-8 h-8 rounded-full bg-white border border-gray-100 text-purple-600 flex items-center justify-center shadow-sm hover:bg-gray-50 transition-colors active:scale-95 relative"
@@ -3331,7 +3319,10 @@ const HomeScreen: React.FC<{
     isFirstLogin?: boolean;
     isPremium?: boolean;
     onGuiaVisto?: () => void;
-}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, isPremium = false, onGuiaVisto }) => {
+    userId?: string;
+    userState?: UserState;
+    setShowChestNotification?: (show: boolean) => void;
+}> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, isPremium = false, onGuiaVisto, userId, userState, setShowChestNotification }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
@@ -3431,6 +3422,8 @@ const HomeScreen: React.FC<{
             Experimente novos estilos com IA
           </p>
         </div>
+
+        {/* Daily Chest Notification/Button - REMOVED FROM HERE */}
 
         <div className="w-full px-2">
           <HomeCarousel 
@@ -3658,6 +3651,8 @@ const FinalizeScreen: React.FC<{
     return localStorage.getItem('clothing_check_visto') === 'true';
   });
 
+  const podeGerar = clothingImage && clothingImage.startsWith('data:image');
+
   const getScreenTexts = (categoryId: string) => {
     switch (categoryId) {
       case 'blusa': return { title: <>A blusa do <span className="text-[#6A00F4]">look</span>.</>, subtitle: "Personalize os detalhes.", label: "FOTO DA BLUSA", placeholder: "Arraste ou selecione a imagem da peça (ex: uma camisa neutra)" };
@@ -3673,14 +3668,18 @@ const FinalizeScreen: React.FC<{
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const url = URL.createObjectURL(e.target.files[0]);
-      
-      if (!clothingCheckVisto) {
-        setPendingImageUrl(url);
-        setShowClothingCheck(true);
-      } else {
-        setClothingImage(url);
-      }
+      const arquivo = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        if (!clothingCheckVisto) {
+          setPendingImageUrl(base64);
+          setShowClothingCheck(true);
+        } else {
+          setClothingImage(base64);
+        }
+      };
+      reader.readAsDataURL(arquivo);
     }
   };
 
@@ -3709,8 +3708,12 @@ const FinalizeScreen: React.FC<{
   };
 
   const handleCreate = () => {
-    if (!clothingImage) { triggerUpload(); return; }
-    onGenerate(clothingImage);
+    console.log('DEBUG [FinalizeScreen] handleCreate - clothingImage:', !!clothingImage, clothingImage?.substring(0, 50));
+    if (!podeGerar) { 
+      triggerUpload(); 
+      return; 
+    }
+    onGenerate(clothingImage!);
   };
 
   return (
@@ -3872,7 +3875,14 @@ const FinalizeScreen: React.FC<{
 
       <div className="p-8 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] w-full sticky bottom-0 z-30">
         <div className="flex flex-col gap-3">
-            <Button onClick={handleCreate} isLoading={loading}>Criar meu Look Agora!</Button>
+            <Button 
+              onClick={handleCreate} 
+              isLoading={loading}
+              disabled={loading || !podeGerar}
+              className={!podeGerar ? 'grayscale opacity-70' : ''}
+            >
+              {loading ? "Processando..." : (podeGerar ? "Criar meu Look Agora!" : "Selecione a foto da roupa")}
+            </Button>
             <Button variant="ghost" onClick={onRestart} disabled={loading}>Escolher outra categoria</Button>
         </div>
       </div>
@@ -3897,7 +3907,12 @@ const View360Screen: React.FC<{
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, setFunc: React.Dispatch<React.SetStateAction<string | null>>) => {
     if (e.target.files && e.target.files[0]) {
-      setFunc(URL.createObjectURL(e.target.files[0]));
+      const arquivo = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setFunc(event.target?.result as string);
+      };
+      reader.readAsDataURL(arquivo);
     }
   };
 
@@ -4548,15 +4563,34 @@ const ResultScreen: React.FC<{
                         (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
                         (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
 
+  const getDaysSinceJoin = () => {
+    const rawDate = userState.subscriptionStartDate || userState.createdAt;
+    const startDate = parseFirebaseDate(rawDate);
+    if (!startDate) return 0;
+    const now = new Date();
+    const diffTime = now.getTime() - startDate.getTime();
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const daysSinceJoin = getDaysSinceJoin();
+  const is360Unlocked = daysSinceJoin >= 7;
+
   const [activeAngleIndex, setActiveAngleIndex] = useState(0); // 0: Front, 1: Side, 2: Back
   const has360Images = userState.generated360Images && userState.generated360Images.length >= 3;
   const currentImage = has360Images ? userState.generated360Images[activeAngleIndex] : generatedImage;
 
   const handleVeja360 = () => {
+    if (!is360Unlocked) {
+      const daysRemaining = 7 - daysSinceJoin;
+      alert(`✨ Olá, estrela! Sua jornada 360° está quase pronta. \n\nPara garantir a melhor experiência e qualidade, o recurso 360° será liberado em ${daysRemaining} ${daysRemaining === 1 ? 'dia' : 'dias'}. \n\nAproveite para explorar novos looks enquanto preparamos tudo com carinho para você! 💜`);
+      return;
+    }
+
     if (!isPremiumUser) {
       setShow360Modal(true);
       return;
     }
+    
     onView360();
   };
 
@@ -5360,7 +5394,6 @@ const App: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-
   const [userState, setUserState] = useState<UserState>({
     email: '',
     name: '',
@@ -5390,11 +5423,62 @@ const App: React.FC = () => {
     creditsReleased: 0,
     totalPhotosGenerated: 0,
     dailyUsage: null,
-    lastRouletteSpin: null,
     rechargeCount: 0,
     badge: null,
-    pendingCredits: 0
+    pendingCredits: 0,
+    closetLimit: 10
   });
+
+  const [showChestNotification, setShowChestNotification] = useState(false);
+  const [showAchievementModal, setShowAchievementModal] = useState(false);
+  const [showChestModal, setShowChestModal] = useState(false);
+  const [isClaimingChest, setIsClaimingChest] = useState(false);
+  const [achievedBadge, setAchievedBadge] = useState<'gold' | 'diamond' | null>(null);
+  const [showClosetLimitModal, setShowClosetLimitModal] = useState(false);
+  const [pendingClothingImageUrl, setPendingClothingImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (userId && userState.dailyUsage?.date === new Date().toISOString().split('T')[0]) {
+      if (userState.dailyUsage.count >= 30 && !userState.dailyUsage.claimedChest) {
+        setShowChestNotification(true);
+      } else {
+        setShowChestNotification(false);
+      }
+    }
+  }, [userState.dailyUsage, userId]);
+
+  const isChestReady = userState.dailyUsage?.date === new Date().toISOString().split('T')[0] && 
+                      userState.dailyUsage.count >= 30 && 
+                      !userState.dailyUsage.claimedChest;
+
+  const handleClaimChest = async () => {
+    if (!userId || isClaimingChest) return;
+    
+    try {
+      setIsClaimingChest(true);
+      const win = await claimChest(userId);
+      
+      if (win > 0) {
+        // Confetti effect
+        confetti({
+          particleCount: 150,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#6A00F4', '#F52C99', '#FFD700']
+        });
+        
+        setShowChestModal(false);
+        setShowChestNotification(false);
+        
+        // Show success message (could be a toast or another modal, but user asked for "fala parabens")
+        alert('🎉 PARABÉNS! Você ganhou 10 créditos extras! 🎁✨');
+      }
+    } catch (error) {
+      console.error('Erro ao resgatar baú:', error);
+    } finally {
+      setIsClaimingChest(false);
+    }
+  };
 
   const isInitialLoadRef = useRef(true);
 
@@ -5422,8 +5506,6 @@ const App: React.FC = () => {
         // Listener em tempo real para os dados do usuário
         if (userUnsubscribe) userUnsubscribe();
         
-        migrateOrphanedData(true);
-
         userUnsubscribe = listenToUser(user.uid, async (userData) => {
           console.log('🔄 Firestore Update Received for UID:', user.uid);
           console.log('📄 Raw Firestore Data:', JSON.stringify(userData));
@@ -5458,14 +5540,15 @@ const App: React.FC = () => {
               creditsReleased: userData.creditsReleased || 0,
               totalPhotosGenerated: userData.totalPhotosGenerated || 0,
               dailyUsage: userData.dailyUsage || null,
-              lastRouletteSpin: userData.lastRouletteSpin || null,
               rechargeCount: userData.rechargeCount || 0,
               badge: userData.badge || null,
               pendingCredits: userData.pendingCredits || 0,
+              closetLimit: userData.closetLimit || 10,
               streak: userData.streak ?? 0,
               styleProfile: userData.styleProfile ?? null,
               styleTags: userData.styleTags ?? [],
               lastLogin: userData.lastLogin ?? '',
+              createdAt: userData.createdAt || userData.created_at || null,
             };
             console.log('✅ UserState Updated with Credits:', newState.credits);
             return newState;
@@ -5599,7 +5682,6 @@ const App: React.FC = () => {
           creditsReleased: 0,
           totalPhotosGenerated: 0,
           dailyUsage: null,
-          lastRouletteSpin: null,
           rechargeCount: 0,
           badge: null,
           pendingCredits: 0
@@ -5897,88 +5979,6 @@ const App: React.FC = () => {
     setScreen(Screen.FAQ);
   };
 
-  const migrateOrphanedData = async (silent = true) => {
-    if (!auth.currentUser || !auth.currentUser.email) return;
-    const user = auth.currentUser;
-    const userEmail = user.email.toLowerCase().trim();
-    
-    if (!silent) {
-      setLoadingMessage('Sincronizando seus créditos...');
-      setScreen(Screen.LOADING);
-    }
-
-    try {
-      const usersRef = collection(db, 'users');
-      console.log('🔍 Querying for orphaned data with email:', userEmail);
-      const q = query(usersRef, where('email', '==', userEmail));
-      
-      let querySnapshot;
-      try {
-        querySnapshot = await getDocs(q);
-      } catch (queryErr: any) {
-        console.error('❌ Query Error during migration:', queryErr);
-        throw queryErr;
-      }
-      
-      let totalCredits = 0;
-      let foundOrphan = false;
-      let orphanedData = {};
-
-      const orphansToDelete: string[] = [];
-      querySnapshot.forEach((docSnap) => {
-        if (docSnap.id !== user.uid) {
-          console.log('🔍 Found orphaned document:', docSnap.id, docSnap.data());
-          const data = docSnap.data();
-          const creditsToAdd = Number(data.credits ?? data.exp ?? 0);
-          totalCredits += creditsToAdd;
-          orphanedData = { ...orphanedData, ...data };
-          foundOrphan = true;
-          orphansToDelete.push(docSnap.id);
-        }
-      });
-
-      if (foundOrphan && totalCredits > 0) {
-        console.log('🚀 Migrating', totalCredits, 'credits to UID:', user.uid);
-        const primaryRef = doc(db, 'users', user.uid);
-        
-        await setDoc(primaryRef, {
-          ...orphanedData,
-          uid: user.uid,
-          email: userEmail,
-          credits: increment(totalCredits),
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-
-        for (const orphanId of orphansToDelete) {
-          try {
-            await deleteDoc(doc(db, 'users', orphanId));
-            console.log('✅ Deleted orphan:', orphanId);
-          } catch (delErr) {
-            console.error('⚠️ Error deleting orphan (continuing):', orphanId, delErr);
-          }
-        }
-        
-        if (!silent) {
-          alert(`✅ Sincronização concluída! ${totalCredits} créditos recuperados.`);
-          setScreen(Screen.CREDITS);
-        }
-      } else {
-        console.log('ℹ️ No orphaned credits found for migration.');
-        if (!silent) {
-          alert('✅ Seus créditos já estão sincronizados.');
-          setScreen(Screen.CREDITS);
-        }
-      }
-    } catch (error: any) {
-      console.error('❌ Migration Error:', error);
-      const errorMessage = error.message || 'Erro desconhecido';
-      if (!silent) {
-        alert(`❌ Erro ao sincronizar créditos: ${errorMessage}`);
-        setScreen(Screen.CREDITS);
-      }
-    }
-  };
-
   const handleBackFromFAQ = () => {
     if (previousScreen) {
         setScreen(previousScreen);
@@ -5988,10 +5988,45 @@ const App: React.FC = () => {
     setPreviousScreen(null);
   };
 
+  const handleUnlockCloset = async () => {
+    if (userState.credits < 20) {
+      alert('❌ Você não tem créditos suficientes para liberar espaço! Recarregue agora.');
+      setScreen(Screen.CREDITS);
+      setShowClosetLimitModal(false);
+      return;
+    }
+
+    const ok = await unlockClosetSpace(userId);
+    if (ok) {
+      alert('✅ Espaço liberado! Você agora tem +10 slots no seu Closet Virtual.');
+      setShowClosetLimitModal(false);
+      if (pendingClothingImageUrl) {
+        handleGenerateLook(pendingClothingImageUrl);
+        setPendingClothingImageUrl(null);
+      }
+    } else {
+      alert('Erro ao liberar espaço. Tente novamente.');
+    }
+  };
+
   const handleGenerateLook = async (clothingImageUrl: string) => {
+    console.log('DEBUG - userImage length:', userState.uploadedImage?.length);
+    console.log('DEBUG - clothingImage length:', clothingImageUrl?.length);
+    console.log('DEBUG - state completo:', { userImage: !!userState.uploadedImage, clothingImage: !!clothingImageUrl });
+
     if (userState.credits < 10) {
       alert('❌ Você não tem créditos suficientes! Recarregue agora.');
       setScreen(Screen.CREDITS);
+      return;
+    }
+
+    // Verifica limite do Closet Virtual
+    const currentHistorySize = userState.history.length;
+    const currentLimit = userState.closetLimit || 10;
+
+    if (currentHistorySize >= currentLimit) {
+      setPendingClothingImageUrl(clothingImageUrl);
+      setShowClosetLimitModal(true);
       return;
     }
 
@@ -6004,6 +6039,8 @@ const App: React.FC = () => {
 
     setLoadingMessage("A IA está criando o seu look...");
     setAspectRatio('original');
+    
+    // Garantir que a imagem da roupa está no estado global para o LoadingScreen
     setUserState(prev => ({ ...prev, clothingImage: clothingImageUrl }));
     setScreen(Screen.LOADING);
 
@@ -6011,24 +6048,75 @@ const App: React.FC = () => {
     console.log('🚀 [Try-On] Iniciando geração...', {
       category: categoryToUse,
       hasUserImage: !!userState.uploadedImage,
-      hasClothingImage: !!clothingImageUrl
+      hasClothingImage: !!clothingImageUrl,
+      clothingImageUrl: clothingImageUrl?.substring(0, 50) + '...'
     });
 
     try {
-      const userB64Raw = userState.uploadedImage 
-        ? await urlToBase64(userState.uploadedImage) 
-        : "";
-      const clothingB64Raw = await urlToBase64(clothingImageUrl);
-
-      if (!userB64Raw || !clothingB64Raw) {
-        throw new Error("Erro ao processar imagens.");
+      if (!userState.uploadedImage) {
+        throw new Error("Foto do usuário não encontrada. Por favor, tire uma foto sua primeiro.");
+      }
+      if (!clothingImageUrl) {
+        throw new Error("Foto da roupa não encontrada. Por favor, selecione uma peça.");
       }
 
-      // Compressão para garantir estabilidade e performance (768px é o ideal para o modelo Vertex AI)
-      const [userBase64, clothingBase64] = await Promise.all([
-        compressImage(`data:image/jpeg;base64,${userB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
-        compressImage(`data:image/jpeg;base64,${clothingB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1])
+      // Se já for data URL, extrai direto sem fetch. Se for URL, tenta converter ou retorna a URL para o backend
+      const extrairBase64 = async (url: string): Promise<string> => {
+        if (!url) return '';
+        try {
+          if (url.startsWith('data:')) {
+            return url.split(',')[1] || '';
+          }
+          if (url.startsWith('blob:')) {
+            return await urlToBase64(url);
+          }
+          // Tenta converter URL remota para base64 (para compressão)
+          const b64 = await urlToBase64(url);
+          // Se b64 vier vazio (erro de CORS), retorna a URL original para o backend processar
+          return b64 || url;
+        } catch (e) {
+          console.warn(`⚠️ [Try-On] Falha ao converter URL para base64, enviando URL original: ${url.substring(0, 50)}...`);
+          return url;
+        }
+      };
+
+      const [userB64Raw, clothingB64Raw] = await Promise.all([
+        extrairBase64(userState.uploadedImage || ''),
+        extrairBase64(clothingImageUrl)
       ]);
+
+      console.log('📦 [Try-On] Base64 extraído:', {
+        userB64Length: userB64Raw?.length,
+        clothingB64Length: clothingB64Raw?.length,
+        userHasData: !!userB64Raw,
+        clothingHasData: !!clothingB64Raw
+      });
+
+      if (!userB64Raw || (userB64Raw.length < 100 && !userB64Raw.startsWith('http'))) {
+        throw new Error("Não foi possível processar a sua foto. Verifique se ela foi carregada corretamente.");
+      }
+      if (!clothingB64Raw || (clothingB64Raw.length < 100 && !clothingB64Raw.startsWith('http'))) {
+        throw new Error("Não foi possível processar a imagem da roupa. Tente novamente.");
+      }
+
+      // Compressão para garantir estabilidade e performance
+      console.log('🗜️ [Try-On] Iniciando compressão...');
+      const [userBase64, clothingBase64] = await Promise.all([
+        compressImage(userB64Raw, 768, 768, 0.7).then(res => res.includes(',') ? res.split(',')[1] : res),
+        compressImage(clothingB64Raw, 768, 768, 0.7).then(res => res.includes(',') ? res.split(',')[1] : res)
+      ]);
+
+      if (!userBase64 || (userBase64.length < 100 && !userBase64.startsWith('http'))) {
+        throw new Error("Erro na compressão da sua foto.");
+      }
+      if (!clothingBase64 || (clothingBase64.length < 100 && !clothingBase64.startsWith('http'))) {
+        throw new Error("Erro na compressão da imagem da roupa.");
+      }
+
+      console.log('🗜️ [Try-On] Imagens comprimidas:', {
+        userCompressedLength: userBase64?.length,
+        clothingCompressedLength: clothingBase64?.length
+      });
 
       const resultImage = await generateTryOnLook(
         userBase64, 
@@ -6099,6 +6187,17 @@ const App: React.FC = () => {
         else if (currentTotalPhotos >= 60) newBadge = 'gold';
         else if (currentTotalPhotos >= 40) newBadge = 'silver';
         else if (currentTotalPhotos >= 20) newBadge = 'bronze';
+
+        // Verifica se subiu de nível para Ouro ou Diamante
+        if (newBadge !== userState.badge) {
+          if (newBadge === 'gold') {
+            setAchievedBadge('gold');
+            setShowAchievementModal(true);
+          } else if (newBadge === 'diamond') {
+            setAchievedBadge('diamond');
+            setShowAchievementModal(true);
+          }
+        }
 
         try {
           await updateDoc(doc(db, 'users', userId), {
@@ -6174,6 +6273,30 @@ const App: React.FC = () => {
   };
 
   const handleView360 = () => {
+    const isPremiumUser = userState.subscriptionTier === 'premium' || 
+                          (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
+                          (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
+
+    const rawDate = userState.subscriptionStartDate || userState.createdAt;
+    const startDate = parseFirebaseDate(rawDate);
+    let daysSinceJoin = 0;
+    if (startDate) {
+      const now = new Date();
+      const diffTime = now.getTime() - startDate.getTime();
+      daysSinceJoin = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    }
+
+    if (daysSinceJoin < 7) {
+      const daysRemaining = 7 - daysSinceJoin;
+      alert(`✨ Olá, estrela! Sua jornada 360° está quase pronta. \n\nPara garantir a melhor experiência e qualidade, o recurso 360° será liberado em ${daysRemaining} ${daysRemaining === 1 ? 'dia' : 'dias'}. \n\nAproveite para explorar novos looks enquanto preparamos tudo com carinho para você! 💜`);
+      return;
+    }
+
+    if (!isPremiumUser) {
+      setShowPremiumModal(true);
+      return;
+    }
+
     setScreen(Screen.VIEW_360);
   };
 
@@ -6200,19 +6323,29 @@ const App: React.FC = () => {
      try {
        // Preparar Base64 para as 3 imagens
        // Se já temos a imagem gerada de frente, não precisamos gerar de novo
-       const frontB64Raw = userState.generatedImage ? null : (userState.uploadedImage ? await urlToBase64(userState.uploadedImage) : "");
-       const sideB64Raw = await urlToBase64(sideImgUrl);
-       const backB64Raw = await urlToBase64(backImgUrl);
-       const clothingB64Raw = userState.clothingImage ? await urlToBase64(userState.clothingImage) : "";
-       const clothingBackB64Raw = clothingBackImgUrl ? await urlToBase64(clothingBackImgUrl) : null;
+       const safeExtract = async (url: string | null): Promise<string> => {
+         if (!url) return '';
+         try {
+           if (url.startsWith('data:')) return url.split(',')[1] || '';
+           const b64 = await urlToBase64(url);
+           return b64 || url;
+         } catch (e) {
+           return url;
+         }
+       };
+       const frontB64Raw = userState.generatedImage ? null : await safeExtract(userState.uploadedImage);
+       const sideB64Raw = await safeExtract(sideImgUrl);
+       const backB64Raw = await safeExtract(backImgUrl);
+       const clothingB64Raw = await safeExtract(userState.clothingImage);
+       const clothingBackB64Raw = clothingBackImgUrl ? await safeExtract(clothingBackImgUrl) : null;
 
         // Revertendo para 768px para garantir estabilidade, pois 1024px pode causar falhas no modelo Vertex AI
         const [frontB64, sideB64, backB64, clothingB64, clothingBackB64] = await Promise.all([
-          frontB64Raw ? compressImage(`data:image/jpeg;base64,${frontB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]) : Promise.resolve(null),
-          compressImage(`data:image/jpeg;base64,${sideB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
-          compressImage(`data:image/jpeg;base64,${backB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
-          compressImage(`data:image/jpeg;base64,${clothingB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]),
-          clothingBackB64Raw ? compressImage(`data:image/jpeg;base64,${clothingBackB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1]) : Promise.resolve(null)
+          frontB64Raw ? compressImage(frontB64Raw.startsWith('http') ? frontB64Raw : `data:image/jpeg;base64,${frontB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res) : Promise.resolve(null),
+          compressImage(sideB64Raw.startsWith('http') ? sideB64Raw : `data:image/jpeg;base64,${sideB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res),
+          compressImage(backB64Raw.startsWith('http') ? backB64Raw : `data:image/jpeg;base64,${backB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res),
+          compressImage(clothingB64Raw.startsWith('http') ? clothingB64Raw : `data:image/jpeg;base64,${clothingB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res),
+          clothingBackB64Raw ? compressImage(clothingBackB64Raw.startsWith('http') ? clothingBackB64Raw : `data:image/jpeg;base64,${clothingBackB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res) : Promise.resolve(null)
         ]);
 
        if (sideB64 && backB64 && clothingB64) {
@@ -6352,53 +6485,69 @@ const App: React.FC = () => {
       setIsCadastroLoading(true);
       const emailLower = cadastroEmail.toLowerCase().trim();
       
-      // Cria nova conta
-      const result = await createUserWithEmailAndPassword(auth, emailLower, cadastroSenha);
-      const user = result.user;
-      
-      // Cria documento no Firestore com créditos iniciais usando UID como ID
-      const userRef = doc(db, 'users', user.uid);
-      await setDoc(userRef, {
-        email: emailLower,
-        nome: cadastroNome,
-        uid: user.uid,
-        credits: 10,
-        created_at: serverTimestamp()
-      });
-      console.log('Novo usuário criado no Firestore via Cadastro:', user.uid);
-
-      // Envia email de boas-vindas
+      let user;
       try {
-        await fetch('https://us-central1-pandora-ai-7c070.cloudfunctions.net/enviarEmailBoasVindas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: emailLower, name: cadastroNome })
+        // Tenta criar nova conta
+        const result = await createUserWithEmailAndPassword(auth, emailLower, cadastroSenha);
+        user = result.user;
+        
+        // Cria documento no Firestore com créditos iniciais usando UID como ID
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, {
+          email: emailLower,
+          nome: cadastroNome,
+          uid: user.uid,
+          credits: 10,
+          created_at: serverTimestamp()
         });
-        console.log('✅ Email de boas-vindas enviado');
-      } catch (emailError) {
-        console.log('⚠️ Erro ao enviar email:', emailError);
+        console.log('Novo usuário criado no Firestore via Cadastro:', user.uid);
+      } catch (error: any) {
+        // Se o email já estiver em uso, tenta fazer login automaticamente com a mesma senha
+        if (error.code === 'auth/email-already-in-use') {
+          console.log('Email já em uso, tentando login automático...');
+          const loginResult = await signInWithEmailAndPassword(auth, emailLower, cadastroSenha);
+          user = loginResult.user;
+        } else {
+          throw error;
+        }
       }
       
-      // Cria documento no Firestore e inicializa créditos
-      if (auth.currentUser) {
-        setUserId(auth.currentUser.uid);
+      if (user) {
+        setUserId(user.uid);
+        
+        // Busca dados do usuário para atualizar o estado local
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          setUserState(prev => ({ 
+            ...prev, 
+            email: emailLower,
+            name: userData.nome || cadastroNome,
+            credits: userData.credits ?? 10
+          }));
+        } else {
+          setUserState(prev => ({ 
+            ...prev, 
+            email: emailLower,
+            name: cadastroNome,
+            credits: 10
+          }));
+        }
+        
+        // Marca guia como visto para ir direto
+        localStorage.setItem(`guia_visto_${user.uid}`, 'true');
+        setIsFirstLogin(false);
+        setScreen(Screen.MAIN);
       }
-      
-      setUserState(prev => ({ 
-        ...prev, 
-        email: emailLower,
-        name: cadastroNome,
-        credits: 10
-      }));
-      
-      alert('🎉 Conta criada com sucesso!\n\nBem-vindo ao Pandora AI!\n\nVocê recebeu 10 créditos iniciais.');
-      setScreen(Screen.MAIN);
       
     } catch (error: any) {
       console.error('Erro ao cadastrar:', error);
       
       if (error.code === 'auth/email-already-in-use') {
-        alert('❌ Este email já está cadastrado.\n\nUse a tela de login para entrar.');
+        // Já tratado acima com login automático, mas se chegar aqui é porque a senha está errada
+        alert('❌ Este email já está cadastrado com outra senha.\n\nUse a tela de login para entrar ou recuperar sua senha.');
       } else if (error.code === 'auth/invalid-email') {
         alert('❌ Email inválido.\n\nDigite um email válido.');
       } else if (error.code === 'auth/weak-password') {
@@ -6452,6 +6601,10 @@ const App: React.FC = () => {
         name: name,
         credits 
       }));
+
+      // Marca guia como visto para ir direto
+      localStorage.setItem(`guia_visto_${user.uid}`, 'true');
+      setIsFirstLogin(false);
 
       // Limpa campos de cadastro
       setCadastroEmail('');
@@ -6521,6 +6674,7 @@ const App: React.FC = () => {
             setUserState={setUserState}
             setScreen={setScreen}
             setShowSuccessModal={setShowSuccessModal}
+            setIsFirstLogin={setIsFirstLogin}
           />
         );
       case Screen.CADASTRO:
@@ -6663,6 +6817,8 @@ const App: React.FC = () => {
               setIsFirstLogin(false);
               localStorage.setItem(`guia_visto_${userId}`, 'true');
             }}
+            userId={userId || undefined}
+            userState={userState}
           />
         );
         showBanner = true;
@@ -6689,6 +6845,8 @@ const App: React.FC = () => {
                setIsFirstLogin(false);
                localStorage.setItem(`guia_visto_${userId}`, 'true');
              }}
+             userId={userId || undefined}
+             userState={userState}
            />
         );
         break;
@@ -6706,10 +6864,12 @@ const App: React.FC = () => {
                 onUpdateProfile={handleUpdateProfile}
                 onReuse={handleReuseHistoryItem}
                 onOpenFAQ={handleOpenFAQ}
-                onSyncCredits={() => migrateOrphanedData(false)}
+                onSyncCredits={() => {}}
                 setUserId={setUserId}
                 setScreen={setScreen}
                 isAdmin={isAdmin}
+                showChestNotification={showChestNotification}
+                setShowChestNotification={setShowChestNotification}
             />
         );
         onBack = handleBackToHome;
@@ -6812,6 +6972,7 @@ const App: React.FC = () => {
             setUserState={setUserState}
             setScreen={setScreen}
             setShowSuccessModal={setShowSuccessModal}
+            setIsFirstLogin={setIsFirstLogin}
           />
         );
     }
@@ -6828,6 +6989,8 @@ const App: React.FC = () => {
           onBack={onBack}
           backIcon={backIcon}
           styleTags={userState.styleTags}
+          chestReady={isChestReady}
+          onOpenChest={() => setShowChestModal(true)}
         >
           {content}
         </MainLayout>
@@ -7063,6 +7226,186 @@ const App: React.FC = () => {
 
         {/* Modal Admin */}
       </div>
+
+      {/* Closet Limit Modal */}
+      <AnimatePresence>
+        {showClosetLimitModal && (
+          <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-2xl text-center relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-400 to-purple-500"></div>
+              
+              <button 
+                onClick={() => setShowClosetLimitModal(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2"
+              >
+                <X size={24} />
+              </button>
+
+              <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mx-auto mb-6">
+                <Box size={40} />
+              </div>
+
+              <h3 className="text-2xl font-bold text-[#2E0249] mb-2">Closet Cheio! 👗</h3>
+              <p className="text-gray-500 text-sm mb-6 leading-relaxed">
+                Seu Closet Virtual atingiu o limite de <b>{userState.closetLimit || 10} imagens</b>. 
+                Deseja liberar mais <b>10 espaços</b> por apenas <b>20 créditos</b>?
+              </p>
+
+              <div className="bg-gray-50 rounded-2xl p-4 mb-8 flex items-center justify-between">
+                <div className="text-left">
+                  <p className="text-[10px] text-gray-400 uppercase font-bold">Custo</p>
+                  <p className="text-lg font-bold text-blue-600">20 Créditos</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-gray-400 uppercase font-bold">Seu Saldo</p>
+                  <p className="text-lg font-bold text-[#2E0249]">{userState.credits} ⚡</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <Button 
+                  onClick={handleUnlockCloset}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-500 shadow-lg shadow-blue-200"
+                >
+                  <Zap size={18} /> Liberar Espaço Agora
+                </Button>
+                <button 
+                  onClick={() => setShowClosetLimitModal(false)}
+                  className="w-full py-3 text-gray-400 text-sm font-medium hover:text-gray-600 transition-colors"
+                >
+                  Talvez mais tarde
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Chest Modal */}
+      <AnimatePresence>
+        {showChestModal && (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-md flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl text-center relative overflow-hidden"
+            >
+              <button 
+                onClick={() => setShowChestModal(false)}
+                className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 p-2"
+              >
+                <X size={24} />
+              </button>
+
+              <div className="w-24 h-24 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600 mx-auto mb-6 animate-bounce">
+                <Archive size={48} />
+              </div>
+
+              <h2 className="text-2xl font-black text-[#2E0249] mb-2 tracking-tight">
+                BAÚ DE RECOMPENSA! 🎁
+              </h2>
+              
+              <p className="text-gray-500 text-sm mb-8 leading-relaxed">
+                Você usou 30 créditos hoje e liberou um presente especial! Toque no baú para resgatar.
+              </p>
+
+              <Button 
+                onClick={handleClaimChest}
+                disabled={isClaimingChest}
+                className="w-full py-4 text-lg font-black bg-gradient-to-r from-yellow-400 to-orange-500 shadow-lg shadow-yellow-200"
+              >
+                {isClaimingChest ? 'RESGATANDO...' : 'ABRIR BAÚ (+10⚡)'}
+              </Button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Achievement Modal */}
+      <AnimatePresence>
+        {showAchievementModal && (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-md flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
+              animate={{ scale: 1, opacity: 1, rotate: 0 }}
+              exit={{ scale: 0.5, opacity: 0, rotate: 10 }}
+              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl text-center relative overflow-hidden"
+            >
+              {/* Decorative elements */}
+              <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-purple-600/10 to-transparent"></div>
+              <div className="absolute -top-10 -right-10 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl"></div>
+              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-pink-500/10 rounded-full blur-2xl"></div>
+              
+              <div className="relative z-10">
+                <div className="w-24 h-24 mx-auto mb-6 relative">
+                  <div className="absolute inset-0 bg-yellow-400 rounded-full animate-ping opacity-20"></div>
+                  <div className={`w-full h-full rounded-full flex items-center justify-center text-white shadow-xl ${achievedBadge === 'diamond' ? 'bg-gradient-to-br from-blue-400 to-indigo-600' : 'bg-gradient-to-br from-yellow-400 to-orange-500'}`}>
+                    {achievedBadge === 'diamond' ? <Trophy size={48} /> : <Star size={48} fill="currentColor" />}
+                  </div>
+                </div>
+
+                <h2 className="text-3xl font-black text-[#2E0249] mb-2 tracking-tight">
+                  PARABÉNS! 🎉
+                </h2>
+                
+                <p className="text-lg font-bold text-purple-600 mb-4">
+                  Você agora é nível {achievedBadge === 'diamond' ? 'DIAMANTE' : 'OURO'}!
+                </p>
+
+                <div className="bg-purple-50 rounded-2xl p-4 mb-8">
+                  <p className="text-gray-600 text-sm leading-relaxed">
+                    {achievedBadge === 'diamond' ? 
+                      "Incrível! Você atingiu o topo da nossa comunidade. Sua jornada de estilo é uma inspiração para todos! 💎✨" : 
+                      "Uau! Você está brilhando! Seu senso de estilo evoluiu e agora você faz parte da nossa elite Gold! 🌟🚀"
+                    }
+                  </p>
+                </div>
+
+                <Button 
+                  onClick={() => setShowAchievementModal(false)}
+                  className={`w-full py-4 text-lg font-black shadow-lg ${achievedBadge === 'diamond' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-yellow-500 shadow-yellow-200'}`}
+                >
+                  CONTINUAR BRILHANDO
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Chest Notification */}
+      <AnimatePresence>
+        {showChestNotification && (
+          <motion.div
+            initial={{ y: -100, opacity: 0 }}
+            animate={{ y: 20, opacity: 1 }}
+            exit={{ y: -100, opacity: 0 }}
+            className="fixed top-0 left-0 right-0 z-[100] flex justify-center px-4"
+          >
+            <button
+              onClick={() => {
+                setShowChestModal(true);
+              }}
+              className="bg-purple-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border-2 border-white/20 backdrop-blur-md"
+            >
+              <div className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-purple-900 animate-bounce">
+                <Archive size={18} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold">Seu Baú está disponível! 🎁</p>
+                <p className="text-[10px] opacity-80">Toque aqui para resgatar seus 10 créditos.</p>
+              </div>
+              <ArrowRight size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </ErrorBoundary>
   );
 };
