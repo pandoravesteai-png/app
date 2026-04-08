@@ -3025,7 +3025,7 @@ const PremiumBanner: React.FC<{ onUpgrade: () => void }> = ({ onUpgrade }) => {
           <Zap size={16} className="text-yellow-300" /> Plano Premium 🚀
         </h4>
         <p className="text-white/80 text-[10px] leading-tight">
-          Libere 360°, formatos Instagram e ganhe 300 créditos!
+          Libere 360°, formatos Stories e ganhe 300 créditos!
         </p>
       </div>
       <button 
@@ -3439,7 +3439,7 @@ const MainLayout: React.FC<{
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto no-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto no-scrollbar flex flex-col">
         {showBanner && (
           <div className="px-6">
             <CreditAlertBanner credits={credits} onOpenCredits={onOpenCredits} />
@@ -3469,11 +3469,16 @@ const HomeScreen: React.FC<{
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
+  const [showFirstTimeGuide, setShowFirstTimeGuide] = useState(false);
+  const [countdown, setCountdown] = useState(5);
+  const timerRef = useRef<any>(null);
 
   useEffect(() => {
-    if (isFirstLogin) {
+    const visto = localStorage.getItem('foto_guia_visto') === 'true';
+    if (isFirstLogin && !visto) {
       const timer = setTimeout(() => {
-        setShowPhotoGuide(true);
+        setShowFirstTimeGuide(true);
+        setCountdown(5);
       }, 1000);
       return () => clearTimeout(timer);
     }
@@ -3487,7 +3492,40 @@ const HomeScreen: React.FC<{
   };
 
   const triggerUpload = () => {
-    fileInputRef.current?.click();
+    const visto = localStorage.getItem('foto_guia_visto') === 'true';
+    if (!visto) {
+      setShowFirstTimeGuide(true);
+      setCountdown(5);
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
+
+  useEffect(() => {
+    if (showFirstTimeGuide) {
+      timerRef.current = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            if (timerRef.current) clearInterval(timerRef.current);
+            handleCloseGuide();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [showFirstTimeGuide]);
+
+  const handleCloseGuide = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setShowFirstTimeGuide(false);
+    localStorage.setItem('foto_guia_visto', 'true');
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 300);
   };
 
   const handleDefaultUpload = () => {
@@ -3515,44 +3553,172 @@ const HomeScreen: React.FC<{
 
   return (
     <>
-      {/* Modals */}
-      {showPhotoGuide && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl relative">
-            <button onClick={() => setShowPhotoGuide(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-              <X size={24} />
-            </button>
-            <h3 className="text-xl font-bold text-[#2E0249] mb-4 flex items-center gap-2">
-              <Info className="text-purple-600" /> Guia de Foto Perfeita
-            </h3>
-            
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-semibold text-green-600 mb-2 flex items-center gap-2"><Check size={16} /> Boas Práticas</h4>
-                <ul className="text-sm text-gray-600 space-y-1 list-disc pl-5">
-                  <li>Pessoa em pé e de corpo inteiro.</li>
-                  <li>Boa iluminação (luz natural é melhor).</li>
-                  <li>Fundo neutro e sem bagunça.</li>
-                  <li>Roupas mais justas ajudam a IA.</li>
-                </ul>
-              </div>
-              
-              <div>
-                <h4 className="font-semibold text-red-500 mb-2 flex items-center gap-2"><X size={16} /> O que Evitar</h4>
-                <ul className="text-sm text-gray-600 space-y-1 list-disc pl-5">
-                  <li>Fotos cortadas (sem cabeça ou pés).</li>
-                  <li>Pessoas sentadas ou deitadas.</li>
-                  <li>Roupas muito largas (escondem o corpo).</li>
-                  <li>Objetos na frente do corpo.</li>
-                </ul>
+      {/* Modal Guia de Foto Primeira Vez */}
+      {showFirstTimeGuide && (
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          >
+            <div className="overflow-y-auto no-scrollbar flex-1">
+              <div className="p-6 space-y-6">
+                <h3 className="text-2xl font-bold text-[#2E0249] text-center">
+                  📸 Guia de Foto Perfeita
+                </h3>
+                
+                <div className="space-y-4">
+                  <div className="bg-green-50 border border-green-100 rounded-2xl p-4">
+                    <h4 className="font-bold text-green-700 mb-2 flex items-center gap-2">
+                      <Check size={18} /> Boas Práticas
+                    </h4>
+                    <ul className="text-sm text-green-800 space-y-2">
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Pessoa em pé e de corpo inteiro
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Boa iluminação (luz natural é melhor)
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Fundo neutro e sem bagunça
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Roupas mais justas ajudam a IA
+                      </li>
+                    </ul>
+                  </div>
+                  
+                  <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+                    <h4 className="font-bold text-red-700 mb-2 flex items-center gap-2">
+                      <X size={18} /> O que Evitar
+                    </h4>
+                    <ul className="text-sm text-red-800 space-y-2">
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Fotos cortadas (sem cabeça ou pés)
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Pessoas sentadas ou deitadas
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Roupas muito largas (escondem o corpo)
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Objetos na frente do corpo
+                      </li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
             
-            <Button onClick={() => { 
-              setShowPhotoGuide(false); 
-              if (onGuiaVisto) onGuiaVisto();
-            }} className="mt-6">Entendi!</Button>
-          </div>
+            <div className="p-6 bg-gray-50 border-t border-gray-100">
+              <div className="w-full h-1.5 bg-gray-200 rounded-full mb-4 overflow-hidden">
+                <motion.div 
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ duration: 5, ease: "linear" }}
+                  className="h-full bg-purple-600"
+                />
+              </div>
+              
+              <p className="text-center text-xs text-gray-500 mb-4">
+                Abrindo em {countdown} segundos...
+              </p>
+              
+              <Button onClick={handleCloseGuide} className="w-full">
+                Entendi, abrir agora!
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modals */}
+      {showPhotoGuide && (
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          >
+            <div className="overflow-y-auto no-scrollbar flex-1">
+              <div className="p-6 space-y-6">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-2xl font-bold text-[#2E0249]">
+                    📸 Guia de Foto Perfeita
+                  </h3>
+                  <button onClick={() => setShowPhotoGuide(false)} className="text-gray-400 hover:text-gray-600">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="bg-green-50 border border-green-100 rounded-2xl p-4">
+                    <h4 className="font-bold text-green-700 mb-2 flex items-center gap-2">
+                      <Check size={18} /> Boas Práticas
+                    </h4>
+                    <ul className="text-sm text-green-800 space-y-2">
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Pessoa em pé e de corpo inteiro
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Boa iluminação (luz natural é melhor)
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Fundo neutro e sem bagunça
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        Roupas mais justas ajudam a IA
+                      </li>
+                    </ul>
+                  </div>
+                  
+                  <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+                    <h4 className="font-bold text-red-700 mb-2 flex items-center gap-2">
+                      <X size={18} /> O que Evitar
+                    </h4>
+                    <ul className="text-sm text-red-800 space-y-2">
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Fotos cortadas (sem cabeça ou pés)
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Pessoas sentadas ou deitadas
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Roupas muito largas (escondem o corpo)
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        Objetos na frente do corpo
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6 bg-gray-50 border-t border-gray-100">
+              <Button onClick={() => { 
+                setShowPhotoGuide(false); 
+                if (onGuiaVisto) onGuiaVisto();
+              }} className="w-full">Entendi!</Button>
+            </div>
+          </motion.div>
         </div>
       )}
 
@@ -3809,6 +3975,12 @@ const FinalizeScreen: React.FC<{
 
   const texts = getScreenTexts(category);
 
+  useEffect(() => {
+    if (!gifGuiaVisto) {
+      setShowGifGuide(true);
+    }
+  }, [gifGuiaVisto]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const arquivo = e.target.files[0];
@@ -3866,7 +4038,7 @@ const FinalizeScreen: React.FC<{
           <p className="text-gray-500 text-sm">Confira os detalhes antes de gerar</p>
       </div>
 
-      <div className="flex-1 px-6 flex flex-col pt-4 overflow-y-auto no-scrollbar">
+      <div className="flex-1 px-6 flex flex-col pt-4 overflow-y-auto no-scrollbar pb-32 md:pb-4">
         <div className="text-center mb-6">
             <h2 className="text-2xl font-bold text-[#2E0249] leading-tight">{texts.title}</h2>
             <p className="text-sm text-gray-500 mt-2 font-medium">{texts.subtitle}</p>
@@ -4016,8 +4188,8 @@ const FinalizeScreen: React.FC<{
         )}
       </div>
 
-      <div className="p-8 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] w-full sticky bottom-0 z-30">
-        <div className="flex flex-col gap-3">
+      <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-40 md:relative md:p-8 md:rounded-none md:shadow-none md:border-t-0">
+        <div className="max-w-md mx-auto flex flex-col gap-3">
             <Button 
               onClick={handleCreate} 
               isLoading={loading}
@@ -4062,7 +4234,7 @@ const View360Screen: React.FC<{
   const isReady = sideImage && backImage;
 
   return (
-    <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up pb-8 relative overflow-y-auto">
+    <div className="w-full h-full bg-white flex flex-col animate-slide-up relative overflow-hidden">
        <div className="px-6 pb-4 text-center pt-6">
         <div className="inline-flex items-center gap-2 bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-purple-100">
            <Rotate3d size={14} /> MODO 360°
@@ -4075,7 +4247,7 @@ const View360Screen: React.FC<{
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 space-y-6 pb-24">
+      <div className="flex-1 overflow-y-auto px-6 space-y-6 pb-32 md:pb-24">
          
          {/* Imagem Original (Frente) */}
          <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-2xl border border-gray-100">
@@ -4146,15 +4318,17 @@ const View360Screen: React.FC<{
           </div>
       </div>
 
-      <div className="p-8 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] w-full sticky bottom-0 z-30">
-        <Button 
-           variant="primary" 
-           disabled={!isReady} 
-           onClick={() => isReady && onGenerate360(sideImage!, backImage!, clothingBackImage)}
-           className={!isReady ? 'opacity-50 grayscale' : ''}
-        >
-            Gerar 360
-        </Button>
+      <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-gray-100 rounded-t-[30px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-40 md:relative md:p-8 md:rounded-none md:shadow-none md:border-t-0">
+        <div className="max-w-md mx-auto w-full">
+          <Button 
+             variant="primary" 
+             disabled={!isReady} 
+             onClick={() => isReady && onGenerate360(sideImage!, backImage!, clothingBackImage)}
+             className={!isReady ? 'opacity-50 grayscale' : ''}
+          >
+              Gerar 360
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -4564,18 +4738,6 @@ const Result360Screen: React.FC<{
                 onOpenPremiumModal?.();
                 return;
               }
-              setAspectRatio('4/5');
-            }} 
-            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
-          >
-            Instagram {!isPremiumUser && '🔒'}
-          </button>
-          <button 
-            onClick={() => {
-              if (!isPremiumUser) {
-                onOpenPremiumModal?.();
-                return;
-              }
               setAspectRatio('9/16');
             }} 
             className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
@@ -4647,20 +4809,12 @@ const Result360Screen: React.FC<{
             <Download size={20} /> Baixar Todas as Fotos
           </Button>
 
-          <div className="grid grid-cols-2 gap-3">
-            <button 
-              onClick={() => compartilharWhatsApp()} 
-              className="py-3 px-6 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-full font-bold text-base flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
-            >
-              <MessageCircle size={18} /> WhatsApp
-            </button>
-            <button 
-              onClick={() => compartilharInstagram()} 
-              className="py-3 px-6 bg-gradient-to-tr from-[#f09433] via-[#e6683c] to-[#bc1888] text-white rounded-full font-bold text-base flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
-            >
-              <Instagram size={18} /> Instagram
-            </button>
-          </div>
+          <button 
+            onClick={() => compartilharWhatsApp()} 
+            className="w-full py-3 px-6 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-full font-bold text-base flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+          >
+            <MessageCircle size={18} /> WhatsApp
+          </button>
           
           <Button 
             onClick={onRestart}
@@ -5003,18 +5157,6 @@ const ResultScreen: React.FC<{
                       onOpenPremiumModal?.();
                       return;
                     }
-                    setAspectRatio('4/5');
-                  }} 
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '4/5' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-[#2E0249]'}`}
-                >
-                  Instagram {!isPremiumUser && '🔒'}
-                </button>
-                <button 
-                  onClick={() => {
-                    if (!isPremiumUser) {
-                      onOpenPremiumModal?.();
-                      return;
-                    }
                     setAspectRatio('9/16');
                   }} 
                   className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aspectRatio === '9/16' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-[#2E0249]'}`}
@@ -5178,22 +5320,14 @@ const ResultScreen: React.FC<{
                     <Download size={18} /> Baixar Imagem
                 </Button>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => onProfessionalShare(userImage || '', generatedImage || '')} 
-                    disabled={isSharing}
-                    className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-[#25D366] hover:bg-[#128C7E] text-white border-none disabled:opacity-70 disabled:cursor-not-allowed"
-                  >
-                    {isSharing ? <Loader2 size={18} className="animate-spin" /> : <MessageCircle size={18} />}
-                    {isSharing ? 'Preparando...' : 'WhatsApp'}
-                  </button>
-                  <button 
-                    onClick={() => compartilharInstagram()} 
-                    className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-gradient-to-tr from-[#f09433] via-[#e6683c] to-[#bc1888] text-white border-none"
-                  >
-                    <Instagram size={18} /> Instagram
-                  </button>
-                </div>
+                <button 
+                  onClick={() => onProfessionalShare(userImage || '', generatedImage || '')} 
+                  disabled={isSharing}
+                  className="w-full py-3 px-6 rounded-full font-bold transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 text-base shadow-sm bg-[#25D366] hover:bg-[#128C7E] text-white border-none disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {isSharing ? <Loader2 size={18} className="animate-spin" /> : <MessageCircle size={18} />}
+                  {isSharing ? 'Preparando...' : 'WhatsApp'}
+                </button>
 
                 <Button onClick={onRestart} variant="outline" className="border-purple-200 text-purple-700 hover:bg-purple-50">
                     <RefreshCcw size={18} /> Trocar peça
@@ -5270,7 +5404,7 @@ const ResultScreen: React.FC<{
                   R$ 29,90
                 </p>
                 <p className="text-[11px] text-purple-400 mt-0.5">
-                  + 360° + formatos Instagram, Stories e Square
+                  + 360° + formatos Stories e Square
                 </p>
               </div>
 

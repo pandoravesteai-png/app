@@ -69,13 +69,13 @@ async function getAccessToken() {
 // ✅ Parâmetros otimizados para melhor qualidade
 const getParametros = () => ({
   sampleCount: 1,
-  addWatermark: false,          // Sem marca d'água do Google
-  baseSteps: 40,                // +qualidade e fidelidade de cor/textura (padrão é ~20)
+  addWatermark: false,
+  baseSteps: 40,
   personGeneration: "allow_adult",
-  safetySetting: "block_only_high", // Menos rejeições desnecessárias
+  safetySetting: "block_only_high",
   outputOptions: {
     mimeType: "image/jpeg",
-    compressionQuality: 90      // Alta qualidade de saída
+    compressionQuality: 90
   }
 });
  
@@ -100,6 +100,8 @@ exports.gerarTryOn = onCall({
  
     if (!imagemCliente) throw new HttpsError("invalid-argument", "Foto da pessoa inválida. Envie em base64.");
     if (!imagemRoupa) throw new HttpsError("invalid-argument", "Foto da roupa inválida. Envie em base64.");
+ 
+    const finalPrompt = customPrompt || "CRITICAL INSTRUCTION: You MUST preserve the person's face, eyes, hair, skin tone and all facial features EXACTLY as they appear in the original photo. DO NOT blur, alter, modify or touch the face or eyes in any way. The face must be 100% identical to the original. ONLY replace the clothing item on the body. The result must look like a real photo of the same person wearing different clothes.";
  
     const accessToken = await getAccessToken();
  

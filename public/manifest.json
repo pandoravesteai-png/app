@@ -3,20 +3,35 @@
   "short_name": "Pandora AI",
   "description": "Experimente roupas virtualmente com IA",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#6A00F4",
   "theme_color": "#6A00F4",
   "orientation": "portrait",
+  "lang": "pt-BR",
   "icons": [
     {
       "src": "https://i.postimg.cc/G2DYHjrv/P-(1).png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "https://i.postimg.cc/G2DYHjrv/P-(1).png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "maskable"
     }
-  ]
+  ],
+  "shortcuts": [
+    {
+      "name": "Criar Look",
+      "short_name": "Criar",
+      "description": "Experimente uma roupa nova",
+      "url": "/",
+      "icons": [{ "src": "https://i.postimg.cc/G2DYHjrv/P-(1).png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [],
+  "categories": ["lifestyle", "shopping", "photo"]
 }
