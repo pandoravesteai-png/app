@@ -56,60 +56,13 @@
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
       }
-      /* Splash screen nativa enquanto o app carrega */
-      #splash {
-        position: fixed;
-        inset: 0;
-        background: linear-gradient(135deg, #6A00F4, #EC4899);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        transition: opacity 0.5s ease;
-      }
-      #splash img {
-        width: 100px;
-        height: 100px;
-        border-radius: 24px;
-        margin-bottom: 20px;
-        animation: splashPulse 1.5s ease-in-out infinite;
-      }
-      #splash p {
-        color: white;
-        font-family: Inter, sans-serif;
-        font-size: 22px;
-        font-weight: 700;
-        letter-spacing: 1px;
-      }
-      @keyframes splashPulse {
-        0%, 100% { transform: scale(1); opacity: 1; }
-        50% { transform: scale(1.05); opacity: 0.9; }
-      }
     </style>
   </head>
   <body>
-    <!-- Splash nativa enquanto React carrega -->
-    <div id="splash">
-      <img src="https://i.postimg.cc/G2DYHjrv/P-(1).png" alt="Pandora AI" />
-      <p>✨ Pandora AI</p>
-    </div>
-
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
 
     <script>
-      // Remove splash quando o app estiver pronto
-      window.addEventListener('load', () => {
-        setTimeout(() => {
-          const splash = document.getElementById('splash');
-          if (splash) {
-            splash.style.opacity = '0';
-            setTimeout(() => splash.remove(), 500);
-          }
-        }, 800);
-      });
-
       // Registra Service Worker
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

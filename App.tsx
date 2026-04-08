@@ -1275,6 +1275,8 @@ const LoadingScreen: React.FC<{
 
 // --- Checkout Screen ---
 const CheckoutScreen: React.FC<{ url: string; onBack: () => void }> = ({ url, onBack }) => {
+  const [isLoading, setIsLoading] = useState(true);
+
   return (
     <div className="flex flex-col h-full bg-white animate-fade-in">
       <div className="p-4 border-b flex items-center gap-4 bg-white sticky top-0 z-10 shadow-sm">
@@ -1290,12 +1292,19 @@ const CheckoutScreen: React.FC<{ url: string; onBack: () => void }> = ({ url, on
           <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Finalize sua assinatura</p>
         </div>
       </div>
-      <div className="flex-1 relative bg-gray-50">
+      <div className="flex-1 relative bg-gray-50 overflow-hidden">
+        {isLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-20">
+            <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4"></div>
+            <p className="text-sm text-gray-500 font-medium animate-pulse">Carregando checkout seguro...</p>
+          </div>
+        )}
         <iframe 
           src={url} 
-          className="w-full h-full border-0"
+          className={`w-full h-full border-0 transition-opacity duration-500 ${isLoading ? 'opacity-0' : 'opacity-100'}`}
           title="Checkout"
           allow="payment"
+          onLoad={() => setIsLoading(false)}
         />
       </div>
     </div>
@@ -5654,6 +5663,8 @@ const App: React.FC = () => {
   const [comentarioAvaliacao, setComentarioAvaliacao] = useState('');
   const [hoveredStar, setHoveredStar] = useState(0);
   const [screen, setScreen] = useState<Screen>(Screen.SPLASH); 
+  const [previousCredits, setPreviousCredits] = useState<number>(0);
+  const [previousTier, setPreviousTier] = useState<string>('basic');
   const [previousScreen, setPreviousScreen] = useState<Screen | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("A IA está criando o seu look...");
   const [is360Loading, setIs360Loading] = useState(false);
@@ -6240,6 +6251,8 @@ const handleProfessionalShare = async (before: string, after: string) => {
   };
 
   const handleOpenCheckout = (url: string) => {
+    setPreviousCredits(userState.credits);
+    setPreviousTier(userState.subscriptionTier || 'basic');
     setPreviousScreen(screen);
     setCheckoutUrl(url);
     setScreen(Screen.CHECKOUT);
@@ -6309,6 +6322,22 @@ const handleProfessionalShare = async (before: string, after: string) => {
   const handleConfirmUpload = () => {
     setScreen(Screen.CATEGORY);
   };
+
+  useEffect(() => {
+    // Se o usuário está no checkout e detectamos aumento de créditos ou mudança de plano
+    if (screen === Screen.CHECKOUT) {
+      const currentCredits = userState.credits;
+      const currentTier = userState.subscriptionTier || 'basic';
+      
+      if (currentCredits > previousCredits || (currentTier === 'premium' && previousTier === 'basic')) {
+        console.log('💰 Pagamento detectado! Redirecionando para a Home...');
+        setScreen(Screen.MAIN);
+        setCheckoutUrl(null);
+        // Opcional: Mostrar um modal de sucesso
+        setShowSuccessModal(true);
+      }
+    }
+  }, [userState.credits, userState.subscriptionTier, screen, previousCredits, previousTier]);
 
   const handleCategorySelect = (id: string) => {
     setUserState(prev => ({ ...prev, selectedCategory: id }));
