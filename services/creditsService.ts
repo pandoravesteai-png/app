@@ -10,14 +10,14 @@ export const getOrCreateUserCredits = async (
     console.log('🔍 Credits for user:', userId, 'Data:', userSnap.data());
     if (!userSnap.exists()) {
       const email = auth.currentUser?.email || '';
-      await setDoc(userRef, { 
+      await setDoc(userRef, {
         email: auth.currentUser?.email || '',
         uid: userId,
-        credits: 10, 
-        subscriptionTier: 'basic',
-        created_at: new Date().toISOString() 
+        credits: 0,
+        subscriptionTier: 'free',
+        created_at: new Date().toISOString()
       });
-      return 10;
+      return 0;
     }
     return userSnap.data().credits ?? userSnap.data().exp ?? 0;
   } catch (error) {
@@ -32,16 +32,15 @@ export const saveUserEmail = async (userId: string, email: string): Promise<void
     const userSnap = await getDoc(userRef);
     
     if (!userSnap.exists()) {
-      await setDoc(userRef, { 
+      await setDoc(userRef, {
         email: auth.currentUser?.email || email,
         uid: userId,
-        credits: 10, 
-        exp: 10,
-        subscriptionTier: 'basic',
-        createdAt: new Date().toISOString() 
+        credits: 0,
+        subscriptionTier: 'free',
+        createdAt: new Date().toISOString()
       });
     } else {
-      await updateDoc(userRef, { email, subscriptionTier: 'basic' });
+      await updateDoc(userRef, { email });
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
@@ -95,76 +94,12 @@ export const deductCredit = async (
   }
 };
 
-export const processCreditRelease = async (userId: string): Promise<void> => {
-  const userRef = doc(db, 'users', userId);
-  try {
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) return;
-    
-    const data = userSnap.data();
-    if (!data.subscriptionStartDate || !data.lastPurchaseAmount) return;
-
-    const startDate = new Date(data.subscriptionStartDate);
-    const now = new Date();
-    const diffDays = Math.floor((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    let totalToRelease = 0;
-    const amount = data.lastPurchaseAmount;
-
-    // Robust check for amounts (Basic: ~20, Premium: ~30)
-    if (amount >= 19 && amount <= 21) {
-      // 19.90 (Basic): 100 total. 60 immediate, 20 next day, 20 day 4. +20 day 6.
-      totalToRelease = 60;
-      if (diffDays >= 1) totalToRelease += 20;
-      if (diffDays >= 4) totalToRelease += 20;
-      if (diffDays >= 6) totalToRelease += 20;
-    } else if (amount >= 29 && amount <= 31) {
-      // 29.90 (Premium): 300 total. 150 immediate, 100 day 4, 50 day 6.
-      totalToRelease = 150;
-      if (diffDays >= 4) totalToRelease += 100;
-      if (diffDays >= 6) totalToRelease += 50;
-    }
-
-    const alreadyReleased = data.creditsReleased || 0;
-    
-    if (totalToRelease > alreadyReleased) {
-      await updateDoc(userRef, {
-        creditsReleased: totalToRelease
-      });
-    }
-
-    // Loyalty Bonus: 2nd recharge of 19.90 gives +20 credits
-    if (data.rechargeCount === 2 && (amount === 19.9 || amount === 20) && !data.loyaltyBonusClaimed) {
-      await updateDoc(userRef, {
-        credits: increment(20),
-        loyaltyBonusClaimed: true
-      });
-    }
-
-    // Check for badges based on totalPhotosGenerated
-    const photos = data.totalPhotosGenerated || 0;
-    let newBadge = data.badge;
-    let creditsToAdd = 0;
-    
-    if (photos >= 100) {
-      newBadge = 'diamond';
-      if (!data.diamondRewardClaimed) creditsToAdd = 200;
-    } else if (photos >= 60) {
-      newBadge = 'gold';
-      if (!data.goldRewardClaimed && data.badge !== 'diamond') creditsToAdd = 50;
-    } else if (photos >= 40) {
-      newBadge = 'silver';
-    } else if (photos >= 20) {
-      newBadge = 'bronze';
-    }
-
-    if (newBadge !== data.badge) {
-      await updateDoc(userRef, { badge: newBadge });
-    }
-
-  } catch (error) {
-    console.error('Erro ao processar liberação de créditos:', error);
-  }
+export const processCreditRelease = async (
+  userId: string
+): Promise<void> => {
+  // Liberação de créditos gerenciada pelo webhook
+  // Esta função foi desativada para evitar conflito
+  return;
 };
 
 export const claimChest = async (userId: string): Promise<number> => {

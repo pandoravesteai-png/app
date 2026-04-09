@@ -329,9 +329,26 @@ exports.webhookCakto = onRequest({ region: "us-central1", cors: true }, async (r
       const snapshot = await db.collection('users').where('email', '==', email).get();
       userRef = !snapshot.empty ? snapshot.docs[0].ref : db.collection('users').doc();
     }
+
+    // Verifica se esse orderId já foi processado
+    const transactionCheck = await db.collection('transactions')
+      .where('orderId', '==', orderId)
+      .get();
+
+    if (!transactionCheck.empty) {
+      console.log('Webhook duplicado ignorado:', orderId);
+      return res.status(200).json({ success: true, duplicate: true });
+    }
+
+    const userSnap = await userRef.get();
+    const dadosAtuais = userSnap.exists ? userSnap.data() : {};
+    const creditosAtuais = dadosAtuais.creditsInitialized ? 
+      dadosAtuais.credits : 0;
+
     const purchaseData = {
       email,
-      credits: admin.firestore.FieldValue.increment(creditosImediatos),
+      credits: creditosAtuais + creditosImediatos,
+      creditsInitialized: true,
       totalPurchased: admin.firestore.FieldValue.increment(creditosTotal),
       creditsReleased: admin.firestore.FieldValue.increment(creditosImediatos),
       lastPurchasePlan: plano,
