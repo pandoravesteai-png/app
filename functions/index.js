@@ -266,18 +266,19 @@ exports.webhookCakto = onRequest({ region: "us-central1", cors: true }, async (r
     }
     const purchaseData = {
       email,
-      credits: admin.firestore.FieldValue.increment(creditos),
+      creditsReleased: 0,
+      rechargeCount: admin.firestore.FieldValue.increment(1),
       lastPurchasePlan: plano,
       lastPurchaseAmount: valor,
       lastPurchaseCredits: creditos,
       lastPurchaseDate: admin.firestore.FieldValue.serverTimestamp(),
+      subscriptionStartDate: new Date().toISOString(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
     if (plano === 'Premium') {
       const now = new Date();
       purchaseData.subscriptionTier = 'premium';
       purchaseData.subscriptionExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      purchaseData.subscriptionStartDate = now.toISOString();
     }
     await userRef.set(purchaseData, { merge: true });
     await db.collection('transactions').add({

@@ -5,6 +5,8 @@
     "camera",
     "payment",
     "accelerometer",
-    "notifications"
+    "notifications",
+    "clipboard-read",
+    "clipboard-write"
   ]
 }

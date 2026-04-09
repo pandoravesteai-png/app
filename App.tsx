@@ -98,6 +98,21 @@ const createCombinedImage = async (before: string, after: string): Promise<strin
   });
 };
 
+const copiarPix = (texto: string) => {
+  const textarea = document.createElement('textarea');
+  textarea.value = texto;
+  textarea.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, 99999);
+  const ok = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (ok) {
+    alert('Código Pix copiado com sucesso!');
+  }
+};
+
 const parseFirebaseDate = (date: any): Date | null => {
   if (!date) return null;
   if (date instanceof Date) return date;
@@ -1273,44 +1288,7 @@ const LoadingScreen: React.FC<{
   );
 };
 
-// --- Checkout Screen ---
-const CheckoutScreen: React.FC<{ url: string; onBack: () => void }> = ({ url, onBack }) => {
-  const [isLoading, setIsLoading] = useState(true);
-
-  return (
-    <div className="flex flex-col h-full bg-white animate-fade-in">
-      <div className="p-4 border-b flex items-center gap-4 bg-white sticky top-0 z-10 shadow-sm">
-        <button 
-          onClick={onBack} 
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600"
-          aria-label="Voltar"
-        >
-          <ArrowLeft size={24} />
-        </button>
-        <div>
-          <h2 className="text-lg font-bold text-[#2E0249]">Pagamento Seguro</h2>
-          <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Finalize sua assinatura</p>
-        </div>
-      </div>
-      <div className="flex-1 relative bg-gray-50 overflow-hidden">
-        {isLoading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-20">
-            <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4"></div>
-            <p className="text-sm text-gray-500 font-medium animate-pulse">Carregando checkout seguro...</p>
-          </div>
-        )}
-        <iframe 
-          src={url} 
-          className={`w-full h-full border-0 transition-opacity duration-500 ${isLoading ? 'opacity-0' : 'opacity-100'}`}
-          title="Checkout"
-          allow="payment"
-          onLoad={() => setIsLoading(false)}
-        />
-      </div>
-    </div>
-  );
-};
-
+// --- Login Screen ---
 const LoginScreen: React.FC<{ 
   onLogin: (email: string, uid: string) => void; 
   onNoRegistration: () => void;
@@ -2057,14 +2035,15 @@ const ProfileScreen: React.FC<{
 
                   {/* Credit Release Message */}
                   {userState.subscriptionStartDate && userState.creditsReleased! < (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 30 ? 300 : 120) && (
-                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 mb-4 flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 text-purple-600">
-                        <Sparkles size={16} />
+                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 mb-4 flex items-start gap-3 shadow-sm">
+                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 text-purple-600">
+                        <Sparkles size={20} />
                       </div>
                       <div>
-                        <p className="text-[11px] font-bold text-purple-900">Novos créditos em breve! ✨</p>
-                        <p className="text-[10px] text-purple-700/80 leading-tight">
-                          Fique de olho! Mais créditos serão liberados automaticamente durante sua jornada nos próximos dias.
+                        <p className="text-xs font-bold text-purple-900 mb-1">Novos créditos em breve! ✨</p>
+                        <p className="text-[11px] text-purple-700/90 leading-relaxed">
+                          Fique tranquilo! Seus créditos serão liberados aos poucos automaticamente nos próximos dias. 
+                          Aproveite para realizar as missões diárias e ganhar bônus extras enquanto aguarda!
                         </p>
                       </div>
                     </div>
@@ -6251,11 +6230,8 @@ const handleProfessionalShare = async (before: string, after: string) => {
   };
 
   const handleOpenCheckout = (url: string) => {
-    setPreviousCredits(userState.credits);
-    setPreviousTier(userState.subscriptionTier || 'basic');
-    setPreviousScreen(screen);
-    setCheckoutUrl(url);
-    setScreen(Screen.CHECKOUT);
+    // Sempre abre no navegador externo conforme solicitado pelo usuário
+    window.open(url, '_blank');
   };
 
   const handleBuyCredits = async (plan: '20' | '30') => {
@@ -6267,7 +6243,7 @@ const handleProfessionalShare = async (before: string, after: string) => {
     try {
       const result = await createPixPayment(userId, plan, userState.email);
       if (result.url) {
-        window.open(result.url, '_blank');
+        handleOpenCheckout(result.url);
       }
     } catch (error) {
       console.error('Erro:', error);
@@ -7377,15 +7353,6 @@ const handleProfessionalShare = async (before: string, after: string) => {
           />
         );
         onBack = () => setScreen(Screen.FINALIZE);
-        break;
-      case Screen.CHECKOUT:
-        content = (
-          <CheckoutScreen 
-            url={checkoutUrl || "https://pay.cakto.com.br/wsopww7_808505?"} 
-            onBack={() => setScreen(previousScreen || Screen.ONBOARDING)} 
-          />
-        );
-        onBack = () => setScreen(previousScreen || Screen.ONBOARDING);
         break;
       case Screen.VIEW_360:
          content = (

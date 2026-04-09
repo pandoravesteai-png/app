@@ -16,6 +16,13 @@ async function startServer() {
   const PORT = 3000;
   app.use(express.json());
 
+  app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'clipboard-read=*, clipboard-write=*');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    next();
+  });
+
   // Serve a imagem gerada direto do Firestore
   app.get('/img/:shareId', async (req, res) => {
     try {

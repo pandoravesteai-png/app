@@ -111,13 +111,14 @@ export const processCreditRelease = async (userId: string): Promise<void> => {
     let totalToRelease = 0;
     const amount = data.lastPurchaseAmount;
 
-    if (amount === 19.9 || amount === 20) {
+    // Robust check for amounts (Basic: ~20, Premium: ~30)
+    if (amount >= 19 && amount <= 21) {
       // 19.90 (Basic): 100 total. 60 immediate, 20 next day, 20 day 4. +20 day 6.
       totalToRelease = 60;
       if (diffDays >= 1) totalToRelease += 20;
       if (diffDays >= 4) totalToRelease += 20;
       if (diffDays >= 6) totalToRelease += 20;
-    } else if (amount === 29.9 || amount === 30) {
+    } else if (amount >= 29 && amount <= 31) {
       // 29.90 (Premium): 300 total. 150 immediate, 100 day 4, 50 day 6.
       totalToRelease = 150;
       if (diffDays >= 4) totalToRelease += 100;
