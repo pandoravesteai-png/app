@@ -61,6 +61,7 @@ export interface UserState {
   subscriptionExpiresAt?: string | null;
   subscriptionStartDate?: string | null;
   creditsReleased?: number;
+  totalPurchased?: number;
   totalPhotosGenerated?: number;
   dailyUsage?: { date: string, count: number } | null;
   lastRouletteSpin?: string | null;

@@ -56,9 +56,16 @@ export const deductCredit = async (
   try {
     const userSnap = await getDoc(userRef);
     const data = userSnap.data();
-    const currentCredits = data?.credits ?? data?.exp ?? 0;
+    if (!userSnap.exists()) return false;
 
-    if (!userSnap.exists() || currentCredits < amount) {
+    const currentCredits = data?.credits ?? 0;
+    const totalPurchased = data?.totalPurchased ?? 0;
+    const released = data?.creditsReleased ?? 0;
+    const blocked = Math.max(0, totalPurchased - released);
+    const usable = currentCredits - blocked;
+
+    if (usable < amount) {
+      console.log('❌ Saldo insuficiente ou bloqueado:', { usable, amount, blocked });
       return false;
     }
 
@@ -66,7 +73,8 @@ export const deductCredit = async (
     const isNewDay = data?.dailyUsage?.date !== today;
 
     const updates: any = {
-      totalPhotosGenerated: increment(1)
+      totalPhotosGenerated: increment(1),
+      credits: increment(-amount)
     };
 
     if (isNewDay) {
@@ -77,14 +85,6 @@ export const deductCredit = async (
       };
     } else {
       updates['dailyUsage.count'] = increment(amount);
-    }
-    
-    if (data?.credits !== undefined) {
-      updates.credits = increment(-amount);
-    } else if (data?.exp !== undefined) {
-      updates.exp = increment(-amount);
-    } else {
-      updates.credits = increment(-amount);
     }
 
     await updateDoc(userRef, updates);
@@ -126,11 +126,9 @@ export const processCreditRelease = async (userId: string): Promise<void> => {
     }
 
     const alreadyReleased = data.creditsReleased || 0;
-    const releaseNow = totalToRelease - alreadyReleased;
-
-    if (releaseNow > 0) {
+    
+    if (totalToRelease > alreadyReleased) {
       await updateDoc(userRef, {
-        credits: increment(releaseNow),
         creditsReleased: totalToRelease
       });
     }

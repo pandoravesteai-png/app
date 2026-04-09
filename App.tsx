@@ -286,6 +286,90 @@ window.addEventListener('beforeinstallprompt', (e) => {
   window.deferredPrompt = e;
 });
 
+// --- Credit Schedule Component ---
+const CreditSchedule: React.FC<{ 
+  subscriptionStartDate?: string | null;
+  creditsReleased?: number;
+  lastPurchaseAmount?: number | null;
+}> = ({ subscriptionStartDate, creditsReleased, lastPurchaseAmount }) => {
+  if (!subscriptionStartDate) return null;
+
+  const isBasic = lastPurchaseAmount === 19.9 || lastPurchaseAmount === 20;
+
+  return (
+    <div className="bg-gray-900 rounded-2xl p-4 text-white shadow-lg w-full">
+      <h4 className="text-xs font-bold uppercase tracking-widest text-purple-400 mb-4">Cronograma de Créditos</h4>
+      <div className="space-y-4">
+        {isBasic ? (
+          // Basic Timeline
+          <>
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-green-500" />
+              <div className="flex-1">
+                <p className="text-[11px] font-bold">Imediato: 60 Créditos</p>
+                <p className="text-[9px] text-gray-400">Recebido no ato da compra</p>
+              </div>
+              <Check size={14} className="text-green-500" />
+            </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${creditsReleased! >= 80 ? 'bg-green-500' : 'bg-gray-600'}`} />
+              <div className="flex-1">
+                <p className="text-[11px] font-bold">Dia 2: +20 Créditos</p>
+                <p className="text-[9px] text-gray-400">Liberação automática</p>
+              </div>
+              {creditsReleased! >= 80 && <Check size={14} className="text-green-500" />}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${creditsReleased! >= 100 ? 'bg-green-500' : 'bg-gray-600'}`} />
+              <div className="flex-1">
+                <p className="text-[11px] font-bold">Dia 4: +20 Créditos</p>
+                <p className="text-[9px] text-gray-400">Finalização do pacote</p>
+              </div>
+              {creditsReleased! >= 100 && <Check size={14} className="text-green-500" />}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${creditsReleased! >= 120 ? 'bg-green-500' : 'bg-gray-600'}`} />
+              <div className="flex-1 text-purple-300">
+                <p className="text-[11px] font-bold">Dia 6: +20 BÔNUS</p>
+                <p className="text-[9px] text-purple-400/60">Presente Pandora AI</p>
+              </div>
+              {creditsReleased! >= 120 && <Check size={14} className="text-green-500" />}
+            </div>
+          </>
+        ) : (
+          // Premium Timeline
+          <>
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-green-500" />
+              <div className="flex-1">
+                <p className="text-[11px] font-bold">Imediato: 150 Créditos</p>
+                <p className="text-[9px] text-gray-400">Recebido no ato da compra</p>
+              </div>
+              <Check size={14} className="text-green-500" />
+            </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${creditsReleased! >= 250 ? 'bg-green-500' : 'bg-gray-600'}`} />
+              <div className="flex-1">
+                <p className="text-[11px] font-bold">Dia 4: +100 Créditos</p>
+                <p className="text-[9px] text-gray-400">Liberação automática</p>
+              </div>
+              {creditsReleased! >= 250 && <Check size={14} className="text-green-500" />}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${creditsReleased! >= 300 ? 'bg-green-500' : 'bg-gray-600'}`} />
+              <div className="flex-1">
+                <p className="text-[11px] font-bold">Dia 6: +50 Créditos</p>
+                <p className="text-[9px] text-gray-400">Finalização do pacote</p>
+              </div>
+              {creditsReleased! >= 300 && <Check size={14} className="text-green-500" />}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- Error Boundary Component ---
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -1595,14 +1679,16 @@ const ProfileScreen: React.FC<{
     isAdmin?: boolean;
     onOpenAdmin?: () => void;
     onSyncCredits?: () => void;
+    onFixCredits?: () => void;
     onBadgeClick?: (badgeLabel: string, min: number) => void;
-}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits, onBadgeClick }) => {
+}> = ({ userId, userState, setUserState, history, onAddCredits, onBuyCredits, onBack, onUpdateProfile, onReuse, onOpenFAQ, onOpenCheckout, setUserId, setScreen, isAdmin, onOpenAdmin, onSyncCredits, onFixCredits, onBadgeClick }) => {
     const [editingName, setEditingName] = useState(false);
     const [showLogoutModal, setShowLogoutModal] = useState(false);
     const [newName, setNewName] = useState(userState.name || '');
     const [image, setImage] = useState<string | null>(userState.profileImage || null);
     const [tempImage, setTempImage] = useState<string | null>(null);
     const [isEditingImage, setIsEditingImage] = useState(false);
+    const [showCreditNotification, setShowCreditNotification] = useState(false);
     const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryItem | null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState<string[]>([]);
@@ -1614,7 +1700,12 @@ const ProfileScreen: React.FC<{
             setNewName(userState.name || '');
         }
         setImage(userState.profileImage || null);
-    }, [userState.name, userState.profileImage, editingName]);
+
+        // Verifica se há créditos pendentes para mostrar notificação
+        if (userState.pendingCredits && userState.pendingCredits > 0) {
+          setShowCreditNotification(true);
+        }
+    }, [userState.name, userState.profileImage, editingName, userState.pendingCredits]);
 
     const handleDeleteSelected = async () => {
       if (selectedItems.length === 0) return;
@@ -1751,6 +1842,12 @@ const ProfileScreen: React.FC<{
                       (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 29.90 || userState.lastPurchaseAmount === 30) ||
                       (userState.lastPlan && (userState.lastPlan.toLowerCase().includes('premium') || userState.lastPlan.includes('29,90') || userState.lastPlan.includes('29.90') || userState.lastPlan.includes('30')));
 
+    const totalPurchased = userState.totalPurchased || 0;
+    const released = userState.creditsReleased || 0;
+    const blocked = Math.max(0, totalPurchased - released);
+    const usable = userState.credits - blocked;
+    const needsFix = userState.credits > (totalPurchased + 20); // 20 is a safe margin for initial credits + some rewards
+
     return (
         <div className="w-full min-h-screen bg-white flex flex-col animate-slide-up relative overflow-y-auto">
             {/* Header removido - agora no MainLayout */}
@@ -1883,6 +1980,42 @@ const ProfileScreen: React.FC<{
                         onChange={handleFileChange}
                     />
                 </div>
+
+                {showCreditNotification && userState.pendingCredits! > 0 && (
+                  <div
+                    onClick={async () => {
+                      // Usuário clica para reivindicar — zera o pendingCredits
+                      const { doc: firestoreDoc, updateDoc } = await import('firebase/firestore');
+                      await updateDoc(firestoreDoc(db, 'users', userId), {
+                        pendingCredits: 0
+                      });
+                      setShowCreditNotification(false);
+                    }}
+                    style={{
+                      background: 'linear-gradient(135deg, #6A00F4, #EC4899)',
+                      borderRadius: '16px',
+                      padding: '16px',
+                      margin: '12px 16px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      animation: 'pulse 2s infinite',
+                      width: '100%',
+                      maxWidth: '400px'
+                    }}
+                  >
+                    <div>
+                      <p style={{ color: 'white', fontWeight: 'bold', fontSize: '15px', margin: 0 }}>
+                        ✨ +{userState.pendingCredits} créditos liberados!
+                      </p>
+                      <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: '12px', margin: '4px 0 0' }}>
+                        Clique aqui para resgatar agora
+                      </p>
+                    </div>
+                    <span style={{ fontSize: '28px' }}>🎁</span>
+                  </div>
+                )}
                 
                 <div style={{ marginBottom: '20px', width: '100%', maxWidth: '400px' }}>
                   <label style={{ 
@@ -1989,9 +2122,11 @@ const ProfileScreen: React.FC<{
                       <h3 className="text-sm font-bold text-[#2E0249] flex items-center gap-2">
                         <Trophy size={16} className="text-yellow-500" /> Sua Jornada
                       </h3>
-                      <span className="text-[10px] font-bold px-2 py-1 bg-purple-100 text-purple-700 rounded-full uppercase">
-                        {userState.badge || 'Iniciante'}
-                      </span>
+                      <div className="flex gap-2">
+                        <span className="text-[10px] font-bold px-2 py-1 bg-purple-100 text-purple-700 rounded-full uppercase">
+                          {userState.badge || 'Iniciante'}
+                        </span>
+                      </div>
                     </div>
                     
                     <div className="flex justify-between items-end gap-2 px-2">
@@ -2034,7 +2169,7 @@ const ProfileScreen: React.FC<{
                   </div>
 
                   {/* Credit Release Message */}
-                  {userState.subscriptionStartDate && userState.creditsReleased! < (userState.lastPurchaseAmount === 29.9 || userState.lastPurchaseAmount === 30 ? 300 : 120) && (
+                  {userState.subscriptionStartDate && blocked > 0 && (
                     <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 mb-4 flex items-start gap-3 shadow-sm">
                       <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 text-purple-600">
                         <Sparkles size={20} />
@@ -2043,85 +2178,13 @@ const ProfileScreen: React.FC<{
                         <p className="text-xs font-bold text-purple-900 mb-1">Novos créditos em breve! ✨</p>
                         <p className="text-[11px] text-purple-700/90 leading-relaxed">
                           Fique tranquilo! Seus créditos serão liberados aos poucos automaticamente nos próximos dias. 
-                          Aproveite para realizar as missões diárias e ganhar bônus extras enquanto aguarda!
+                          Você tem <span className="font-bold">{usable}</span> disponíveis agora de um total de <span className="font-bold">{userState.credits}</span>.
                         </p>
                       </div>
                     </div>
                   )}
 
-                  {/* Credit Release Timeline */}
-                  {userState.subscriptionStartDate && (
-                    <div className="bg-gray-900 rounded-2xl p-4 text-white shadow-lg">
-                      <h4 className="text-xs font-bold uppercase tracking-widest text-purple-400 mb-4">Cronograma de Créditos</h4>
-                      <div className="space-y-4">
-                        {(userState.lastPurchaseAmount === 19.9 || userState.lastPurchaseAmount === 20) ? (
-                          // Basic Timeline
-                          <>
-                            <div className="flex items-center gap-3">
-                              <div className="w-2 h-2 rounded-full bg-green-500" />
-                              <div className="flex-1">
-                                <p className="text-[11px] font-bold">Imediato: 60 Créditos</p>
-                                <p className="text-[9px] text-gray-400">Recebido no ato da compra</p>
-                              </div>
-                              <Check size={14} className="text-green-500" />
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 80 ? 'bg-green-500' : 'bg-gray-600'}`} />
-                              <div className="flex-1">
-                                <p className="text-[11px] font-bold">Dia 2: +20 Créditos</p>
-                                <p className="text-[9px] text-gray-400">Liberação automática</p>
-                              </div>
-                              {userState.creditsReleased! >= 80 && <Check size={14} className="text-green-500" />}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 100 ? 'bg-green-500' : 'bg-gray-600'}`} />
-                              <div className="flex-1">
-                                <p className="text-[11px] font-bold">Dia 4: +20 Créditos</p>
-                                <p className="text-[9px] text-gray-400">Finalização do pacote</p>
-                              </div>
-                              {userState.creditsReleased! >= 100 && <Check size={14} className="text-green-500" />}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 120 ? 'bg-green-500' : 'bg-gray-600'}`} />
-                              <div className="flex-1 text-purple-300">
-                                <p className="text-[11px] font-bold">Dia 6: +20 BÔNUS</p>
-                                <p className="text-[9px] text-purple-400/60">Presente Pandora AI</p>
-                              </div>
-                              {userState.creditsReleased! >= 120 && <Check size={14} className="text-green-500" />}
-                            </div>
-                          </>
-                        ) : (
-                          // Premium Timeline
-                          <>
-                            <div className="flex items-center gap-3">
-                              <div className="w-2 h-2 rounded-full bg-green-500" />
-                              <div className="flex-1">
-                                <p className="text-[11px] font-bold">Imediato: 150 Créditos</p>
-                                <p className="text-[9px] text-gray-400">Recebido no ato da compra</p>
-                              </div>
-                              <Check size={14} className="text-green-500" />
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 250 ? 'bg-green-500' : 'bg-gray-600'}`} />
-                              <div className="flex-1">
-                                <p className="text-[11px] font-bold">Dia 4: +100 Créditos</p>
-                                <p className="text-[9px] text-gray-400">Liberação automática</p>
-                              </div>
-                              {userState.creditsReleased! >= 250 && <Check size={14} className="text-green-500" />}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full ${userState.creditsReleased! >= 300 ? 'bg-green-500' : 'bg-gray-600'}`} />
-                              <div className="flex-1">
-                                <p className="text-[11px] font-bold">Dia 6: +50 Créditos</p>
-                                <p className="text-[9px] text-gray-400">Finalização do pacote</p>
-                              </div>
-                              {userState.creditsReleased! >= 300 && <Check size={14} className="text-green-500" />}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                  {/* Credit Release Timeline removido daqui - agora apenas no modal de créditos */}
                 </div>
                 
                 <div style={{ marginBottom: '20px', width: '100%', maxWidth: '400px' }}>
@@ -3079,6 +3142,10 @@ const VipGroupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isO
 const MainLayout: React.FC<{
   children: React.ReactNode;
   credits: number;
+  usableCredits?: number;
+  subscriptionStartDate?: string | null;
+  creditsReleased?: number;
+  lastPurchaseAmount?: number | null;
   onOpenCredits: () => void;
   onOpenFAQ: () => void;
   onOpenPremiumModal?: () => void;
@@ -3094,6 +3161,10 @@ const MainLayout: React.FC<{
 }> = ({ 
   children, 
   credits, 
+  usableCredits,
+  subscriptionStartDate,
+  creditsReleased,
+  lastPurchaseAmount,
   onOpenCredits, 
   onOpenFAQ, 
   onOpenPremiumModal, 
@@ -3221,6 +3292,17 @@ const MainLayout: React.FC<{
             <p className="text-gray-600 text-sm mb-6">
               Cada geração de look consome 10 créditos. Você pode recarregar seus créditos a qualquer momento para continuar transformando seu estilo!
             </p>
+            
+            {subscriptionStartDate && (
+              <div className="mb-6 text-left">
+                <CreditSchedule 
+                  subscriptionStartDate={subscriptionStartDate}
+                  creditsReleased={creditsReleased}
+                  lastPurchaseAmount={lastPurchaseAmount}
+                />
+              </div>
+            )}
+
             <Button onClick={() => { setShowCreditsInfo(false); onOpenCredits(); }}>
               Gerenciar Créditos
             </Button>
@@ -3415,7 +3497,10 @@ const MainLayout: React.FC<{
             onClick={() => setShowCreditsInfo(true)}
             className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-full border cursor-pointer transition-colors ${badgeConfig.bg} ${badgeConfig.border} ${badgeConfig.text}`}
           >
-            <span className="text-xs font-bold">{credits} <span className="hidden sm:inline">Créditos</span></span>
+            <span className="text-xs font-bold">
+              {usableCredits !== undefined && usableCredits !== credits ? `${usableCredits} / ${credits}` : credits} 
+              <span className="hidden sm:inline"> Créditos</span>
+            </span>
             {badgeConfig.icon}
           </div>
           <button 
@@ -5717,6 +5802,24 @@ const App: React.FC = () => {
   const isChestReady = userState.dailyUsage?.date === new Date().toISOString().split('T')[0] && 
                       Math.floor(userState.dailyUsage.count / 50) > (userState.dailyUsage.chestsClaimed || 0);
 
+  const handleFixCredits = async () => {
+    if (!userId) return;
+    const totalPurchased = userState.totalPurchased || 0;
+    const correctCredits = totalPurchased + 10; // Plan + Initial
+    
+    if (confirm(`Deseja corrigir seu saldo para ${correctCredits} créditos?\n\nIsso resolverá o problema de créditos duplicados.`)) {
+      try {
+        const userRef = doc(db, 'users', userId);
+        await updateDoc(userRef, { credits: correctCredits });
+        setUserState(prev => ({ ...prev, credits: correctCredits }));
+        alert('✅ Saldo corrigido com sucesso!');
+      } catch (error) {
+        console.error('Erro ao corrigir saldo:', error);
+        alert('❌ Erro ao corrigir saldo.');
+      }
+    }
+  };
+
   const handleBadgeClick = (badgeLabel: string, min: number) => {
     const currentPhotos = userState.totalPhotosGenerated || 0;
     const isUnlocked = currentPhotos >= min;
@@ -6032,21 +6135,11 @@ const App: React.FC = () => {
     const credits = parseInt(urlParams.get('credits') || '0');
     const amount = parseFloat(urlParams.get('amount') || '0');
     
-    if (payment === 'success' && paidUserId && credits > 0) {
-      // Se o valor for 29.90, ativa o premium por 30 dias
-      if (amount === 29.9 || amount === 29.90) {
-        purchasePremium(paidUserId).then(() => {
-          addCredits(paidUserId, credits).then(() => {
-            window.history.replaceState({}, '', '/');
-            alert(`✅ Plano Premium Ativado! ${credits} créditos adicionados.`);
-          });
-        });
-      } else {
-        addCredits(paidUserId, credits).then(() => {
-          window.history.replaceState({}, '', '/');
-          alert(`✅ ${credits} créditos adicionados!`);
-        });
-      }
+    if (payment === 'success' && paidUserId) {
+      // Apenas limpa a URL e mostra o alerta. 
+      // Os créditos são processados via Webhook e processCreditRelease.
+      window.history.replaceState({}, '', '/');
+      alert(`✅ Pagamento confirmado! Seus créditos estão sendo liberados.`);
     }
 
     // Detecta se a URL tem parâmetros de reset de senha
@@ -7290,6 +7383,7 @@ const handleProfessionalShare = async (before: string, after: string) => {
                 onReuse={handleReuseHistoryItem}
                 onOpenFAQ={handleOpenFAQ}
                 onSyncCredits={() => {}}
+                onFixCredits={handleFixCredits}
                 setUserId={setUserId}
                 setScreen={setScreen}
                 isAdmin={isAdmin}
@@ -7395,9 +7489,18 @@ const handleProfessionalShare = async (before: string, after: string) => {
     }
 
     if (content) {
+      const totalPurchased = userState.totalPurchased || 0;
+      const released = userState.creditsReleased || 0;
+      const blocked = Math.max(0, totalPurchased - released);
+      const usable = userState.credits - blocked;
+
       return (
         <MainLayout 
           credits={userState.credits} 
+          usableCredits={usable}
+          subscriptionStartDate={userState.subscriptionStartDate}
+          creditsReleased={userState.creditsReleased}
+          lastPurchaseAmount={userState.lastPurchaseAmount}
           onOpenCredits={handleOpenCredits} 
           onOpenFAQ={handleOpenFAQ}
           onOpenPremiumModal={() => setShowPremiumModal(true)}

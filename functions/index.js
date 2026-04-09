@@ -246,6 +246,48 @@ exports.gerar360View = onCall({
   }
 });
  
+exports.liberarCreditosDiarios = onRequest({ region: "us-central1", cors: true }, async (req, res) => {
+  try {
+    const db = admin.firestore();
+    const agora = new Date();
+    const usuarios = await db.collection('users').get();
+    let totalLiberados = 0;
+
+    for (const doc of usuarios.docs) {
+      const dados = doc.data();
+      const schedule = dados.creditSchedule;
+      if (!schedule || !Array.isArray(schedule)) continue;
+
+      let creditosParaLiberar = 0;
+      let scheduleAtualizado = false;
+      const novoSchedule = schedule.map(item => {
+        if (!item.released && new Date(item.releaseDate) <= agora) {
+          creditosParaLiberar += item.credits;
+          scheduleAtualizado = true;
+          return { ...item, released: true, releasedAt: agora.toISOString() };
+        }
+        return item;
+      });
+
+      if (scheduleAtualizado && creditosParaLiberar > 0) {
+        await doc.ref.update({
+          credits: admin.firestore.FieldValue.increment(creditosParaLiberar),
+          creditsReleased: admin.firestore.FieldValue.increment(creditosParaLiberar),
+          creditSchedule: novoSchedule,
+          pendingCredits: creditosParaLiberar,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        totalLiberados += creditosParaLiberar;
+      }
+    }
+
+    return res.status(200).json({ success: true, totalLiberados });
+  } catch (error) {
+    console.error('Erro ao liberar créditos:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 exports.webhookCakto = onRequest({ region: "us-central1", cors: true }, async (req, res) => {
   try {
     const { event, data } = req.body;
@@ -254,8 +296,31 @@ exports.webhookCakto = onRequest({ region: "us-central1", cors: true }, async (r
     const email = customer?.email?.toLowerCase().trim();
     if (!email || status !== 'paid') return res.status(400).send('Invalid data');
     const valor = parseFloat(String(amount).replace(',', '.'));
-    const creditos = valor >= 29.80 ? 300 : 100;
-    const plano = valor >= 29.80 ? 'Premium' : 'Basic';
+
+    // Define plano e cronograma de liberação
+    let creditosTotal, creditosImediatos, cronograma, plano;
+
+    if (valor >= 29.80) {
+      plano = 'Premium';
+      creditosTotal = 300;
+      creditosImediatos = 100;
+      cronograma = [
+        { dia: 2, creditos: 70 },
+        { dia: 4, creditos: 70 },
+        { dia: 6, creditos: 60 }
+      ];
+    } else {
+      plano = 'Basic';
+      creditosTotal = 100;
+      creditosImediatos = 40;
+      cronograma = [
+        { dia: 2, creditos: 30 },
+        { dia: 4, creditos: 30 }
+      ];
+    }
+
+    const now = new Date();
+
     const db = admin.firestore();
     let userRef;
     if (external_id) {
@@ -266,23 +331,28 @@ exports.webhookCakto = onRequest({ region: "us-central1", cors: true }, async (r
     }
     const purchaseData = {
       email,
-      creditsReleased: 0,
-      rechargeCount: admin.firestore.FieldValue.increment(1),
+      credits: admin.firestore.FieldValue.increment(creditosImediatos),
+      totalPurchased: admin.firestore.FieldValue.increment(creditosTotal),
+      creditsReleased: admin.firestore.FieldValue.increment(creditosImediatos),
       lastPurchasePlan: plano,
       lastPurchaseAmount: valor,
-      lastPurchaseCredits: creditos,
+      lastPurchaseCredits: creditosTotal,
       lastPurchaseDate: admin.firestore.FieldValue.serverTimestamp(),
-      subscriptionStartDate: new Date().toISOString(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      subscriptionStartDate: now.toISOString(),
+      subscriptionTier: plano.toLowerCase(),
+      subscriptionExpiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      // Cronograma de liberação futura
+      creditSchedule: cronograma.map(item => ({
+        releaseDate: new Date(now.getTime() + item.dia * 24 * 60 * 60 * 1000).toISOString(),
+        credits: item.creditos,
+        released: false,
+        notified: false
+      }))
     };
-    if (plano === 'Premium') {
-      const now = new Date();
-      purchaseData.subscriptionTier = 'premium';
-      purchaseData.subscriptionExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    }
     await userRef.set(purchaseData, { merge: true });
     await db.collection('transactions').add({
-      userId: userRef.id, email, amount: valor, credits: creditos,
+      userId: userRef.id, email, amount: valor, credits: creditosTotal,
       plan: plano, orderId, date: admin.firestore.FieldValue.serverTimestamp()
     });
     return res.status(200).json({ success: true });
