@@ -631,7 +631,7 @@ async function urlToBase64(url: string): Promise<string> {
   }
 }
 
-const compressImage = (base64Str: string, maxWidth = 800, maxHeight = 800, quality = 0.7): Promise<string> => {
+const compressImage = (base64Str: string, maxWidth = 1024, maxHeight = 1024, quality = 0.9): Promise<string> => {
   return new Promise((resolve) => {
     if (!base64Str) {
       resolve(base64Str);
@@ -3540,6 +3540,7 @@ const HomeScreen: React.FC<{
     userState?: UserState;
 }> = ({ onUpload, onContinue, uploadedImage, userName = 'Usuário', onOpenFAQ, isFirstLogin = false, isPremium = false, onGuiaVisto, userId, userState }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
   const [showFirstTimeGuide, setShowFirstTimeGuide] = useState(false);
@@ -3571,6 +3572,16 @@ const HomeScreen: React.FC<{
       setCountdown(5);
     } else {
       fileInputRef.current?.click();
+    }
+  };
+
+  const triggerCamera = () => {
+    const visto = localStorage.getItem('foto_guia_visto') === 'true';
+    if (!visto) {
+      setShowFirstTimeGuide(true);
+      setCountdown(5);
+    } else {
+      cameraInputRef.current?.click();
     }
   };
 
@@ -3870,6 +3881,14 @@ const HomeScreen: React.FC<{
                 accept="image/png, image/jpeg, image/webp"
                 onChange={handleFileChange}
               />
+              <input 
+                type="file" 
+                ref={cameraInputRef} 
+                className="hidden" 
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileChange}
+              />
               
               {isDragging && (
                 <div className="absolute inset-0 bg-purple-100/50 flex items-center justify-center z-10">
@@ -3905,7 +3924,7 @@ const HomeScreen: React.FC<{
               <ImageIcon size={18} className="text-gray-500" />
               <span className="text-sm font-medium text-gray-600">Galeria</span>
             </button>
-            <button onClick={triggerUpload} className="flex items-center justify-center gap-2 py-3 px-4 bg-[#6A00F4] text-white rounded-xl shadow-md shadow-purple-200 active:scale-95 transition-transform hover:bg-[#5800cc]">
+            <button onClick={triggerCamera} className="flex items-center justify-center gap-2 py-3 px-4 bg-[#6A00F4] text-white rounded-xl shadow-md shadow-purple-200 active:scale-95 transition-transform hover:bg-[#5800cc]">
               <CameraIcon size={18} className="text-white" />
               <span className="text-sm font-medium">Tirar Foto Agora</span>
             </button>
@@ -4023,6 +4042,7 @@ const FinalizeScreen: React.FC<{
 }> = ({ category, userImage, onGenerate, onRestart, onBack, loading, isPremium = false, initialClothingImage = null }) => {
   const [clothingImage, setClothingImage] = useState<string | null>(initialClothingImage);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [showGifGuide, setShowGifGuide] = useState(false);
   const [showClothingCheck, setShowClothingCheck] = useState(false);
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
@@ -4095,6 +4115,10 @@ const FinalizeScreen: React.FC<{
     fileInputRef.current?.click();
   };
 
+  const triggerCamera = () => {
+    cameraInputRef.current?.click();
+  };
+
   const handleCreate = () => {
     console.log('DEBUG [FinalizeScreen] handleCreate - clothingImage:', !!clothingImage, clothingImage?.substring(0, 50));
     if (!podeGerar) { 
@@ -4133,6 +4157,7 @@ const FinalizeScreen: React.FC<{
             </div>
              <div onClick={triggerUpload} className="border-2 border-dashed border-gray-200 bg-white rounded-2xl p-6 flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-purple-50 transition-colors group relative overflow-hidden h-48">
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg, image/webp" onChange={handleFileChange} />
+                <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileChange} />
                 {clothingImage ? (
                     <>
                         <img src={clothingImage} alt="Peça selecionada" className="w-full h-full object-contain" />
@@ -4154,7 +4179,7 @@ const FinalizeScreen: React.FC<{
                 <ImageIcon size={18} className="text-gray-500" />
                 <span className="text-sm font-medium text-gray-600">Galeria</span>
             </button>
-            <button onClick={triggerUpload} className="flex items-center justify-center gap-2 py-3 px-4 bg-[#6A00F4] text-white rounded-xl shadow-md shadow-purple-200 active:scale-95 transition-transform">
+            <button onClick={triggerCamera} className="flex items-center justify-center gap-2 py-3 px-4 bg-[#6A00F4] text-white rounded-xl shadow-md shadow-purple-200 active:scale-95 transition-transform">
                 <CameraIcon size={18} className="text-white" />
                 <span className="text-sm font-medium">Câmera</span>
             </button>
@@ -6630,8 +6655,8 @@ const handleProfessionalShare = async (before: string, after: string) => {
       // Compressão para garantir estabilidade e performance
       console.log('🗜️ [Try-On] Iniciando compressão...');
       const [userBase64, clothingBase64] = await Promise.all([
-        compressImage(userB64Raw, 768, 768, 0.7).then(res => res.includes(',') ? res.split(',')[1] : res),
-        compressImage(clothingB64Raw, 768, 768, 0.7).then(res => res.includes(',') ? res.split(',')[1] : res)
+        compressImage(userB64Raw, 1024, 1024, 0.95).then(res => res.includes(',') ? res.split(',')[1] : res),
+        compressImage(clothingB64Raw, 1024, 1024, 0.95).then(res => res.includes(',') ? res.split(',')[1] : res)
       ]);
 
       if (!userBase64 || (userBase64.length < 100 && !userBase64.startsWith('http'))) {
@@ -6857,13 +6882,13 @@ const handleProfessionalShare = async (before: string, after: string) => {
        const clothingB64Raw = await safeExtract(userState.clothingImage);
        const clothingBackB64Raw = clothingBackImgUrl ? await safeExtract(clothingBackImgUrl) : null;
 
-        // Revertendo para 768px para garantir estabilidade, pois 1024px pode causar falhas no modelo Vertex AI
+        // Aumentando para 1024px e qualidade 0.95 para garantir texturas realistas em celulares
         const [frontB64, sideB64, backB64, clothingB64, clothingBackB64] = await Promise.all([
-          frontB64Raw ? compressImage(frontB64Raw.startsWith('http') ? frontB64Raw : `data:image/jpeg;base64,${frontB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res) : Promise.resolve(null),
-          compressImage(sideB64Raw.startsWith('http') ? sideB64Raw : `data:image/jpeg;base64,${sideB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res),
-          compressImage(backB64Raw.startsWith('http') ? backB64Raw : `data:image/jpeg;base64,${backB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res),
-          compressImage(clothingB64Raw.startsWith('http') ? clothingB64Raw : `data:image/jpeg;base64,${clothingB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res),
-          clothingBackB64Raw ? compressImage(clothingBackB64Raw.startsWith('http') ? clothingBackB64Raw : `data:image/jpeg;base64,${clothingBackB64Raw}`, 768, 768, 0.7).then(res => res.split(',')[1] || res) : Promise.resolve(null)
+          frontB64Raw ? compressImage(frontB64Raw.startsWith('http') ? frontB64Raw : `data:image/jpeg;base64,${frontB64Raw}`, 1024, 1024, 0.95).then(res => res.split(',')[1] || res) : Promise.resolve(null),
+          compressImage(sideB64Raw.startsWith('http') ? sideB64Raw : `data:image/jpeg;base64,${sideB64Raw}`, 1024, 1024, 0.95).then(res => res.split(',')[1] || res),
+          compressImage(backB64Raw.startsWith('http') ? backB64Raw : `data:image/jpeg;base64,${backB64Raw}`, 1024, 1024, 0.95).then(res => res.split(',')[1] || res),
+          compressImage(clothingB64Raw.startsWith('http') ? clothingB64Raw : `data:image/jpeg;base64,${clothingB64Raw}`, 1024, 1024, 0.95).then(res => res.split(',')[1] || res),
+          clothingBackB64Raw ? compressImage(clothingBackB64Raw.startsWith('http') ? clothingBackB64Raw : `data:image/jpeg;base64,${clothingBackB64Raw}`, 1024, 1024, 0.95).then(res => res.split(',')[1] || res) : Promise.resolve(null)
         ]);
 
        if (sideB64 && backB64 && clothingB64) {

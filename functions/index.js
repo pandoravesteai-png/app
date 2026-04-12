@@ -70,17 +70,17 @@ async function getAccessToken() {
 const getParametros = () => ({
   sampleCount: 1,
   addWatermark: false,
-  baseSteps: 40,
+  baseSteps: 60, // Aumentado de 40 para 60 para mais detalhes e nitidez
   personGeneration: "allow_adult",
   safetySetting: "block_only_high",
   outputOptions: {
     mimeType: "image/jpeg",
-    compressionQuality: 90
+    compressionQuality: 100 // Qualidade máxima sem compressão
   }
 });
  
 exports.gerarTryOn = onCall({
-  memory: "1GiB",
+  memory: "2GiB",
   timeoutSeconds: 180,
   region: "us-central1",
   cors: true,
@@ -101,7 +101,7 @@ exports.gerarTryOn = onCall({
     if (!imagemCliente) throw new HttpsError("invalid-argument", "Foto da pessoa inválida. Envie em base64.");
     if (!imagemRoupa) throw new HttpsError("invalid-argument", "Foto da roupa inválida. Envie em base64.");
  
-    const finalPrompt = customPrompt || "CRITICAL INSTRUCTION: You MUST preserve the person's face, eyes, hair, skin tone and all facial features EXACTLY as they appear in the original photo. DO NOT blur, alter, modify or touch the face or eyes in any way. The face must be 100% identical to the original. ONLY replace the clothing item on the body. The result must look like a real photo of the same person wearing different clothes.";
+    const finalPrompt = customPrompt || "CRITICAL INSTRUCTION: Ultra-realistic 8k resolution photo. You MUST preserve the person's face, eyes, hair, skin tone and all facial features EXACTLY as they appear in the original photo. DO NOT blur, alter, modify or touch the face or eyes in any way. The face must be 100% identical to the original. ONLY replace the clothing item on the body with high-definition fabric textures, realistic folds, and natural shadows. The result must look like a professional studio photo of the same person wearing different clothes with sharp details.";
  
     const accessToken = await getAccessToken();
  
@@ -167,7 +167,7 @@ exports.gerarTryOn = onCall({
 });
  
 exports.gerar360View = onCall({
-  memory: "2GiB",
+  memory: "4GiB",
   timeoutSeconds: 300,
   region: "us-central1",
   cors: true,
