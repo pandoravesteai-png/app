@@ -3545,6 +3545,7 @@ const HomeScreen: React.FC<{
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
   const [showFirstTimeGuide, setShowFirstTimeGuide] = useState(false);
   const [countdown, setCountdown] = useState(5);
+  const [lastTriggerType, setLastTriggerType] = useState<'file' | 'camera'>('file');
   const timerRef = useRef<any>(null);
 
   useEffect(() => {
@@ -3567,6 +3568,7 @@ const HomeScreen: React.FC<{
 
   const triggerUpload = () => {
     const visto = localStorage.getItem('foto_guia_visto') === 'true';
+    setLastTriggerType('file');
     if (!visto) {
       setShowFirstTimeGuide(true);
       setCountdown(5);
@@ -3577,6 +3579,7 @@ const HomeScreen: React.FC<{
 
   const triggerCamera = () => {
     const visto = localStorage.getItem('foto_guia_visto') === 'true';
+    setLastTriggerType('camera');
     if (!visto) {
       setShowFirstTimeGuide(true);
       setCountdown(5);
@@ -3607,9 +3610,13 @@ const HomeScreen: React.FC<{
     if (timerRef.current) clearInterval(timerRef.current);
     setShowFirstTimeGuide(false);
     localStorage.setItem('foto_guia_visto', 'true');
-    setTimeout(() => {
+    
+    // Abre imediatamente sem delay
+    if (lastTriggerType === 'camera') {
+      cameraInputRef.current?.click();
+    } else {
       fileInputRef.current?.click();
-    }, 300);
+    }
   };
 
   const handleDefaultUpload = () => {
@@ -3850,6 +3857,21 @@ const HomeScreen: React.FC<{
           </div>
 
           <div className="flex flex-col gap-2">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/png, image/jpeg, image/webp"
+              onChange={handleFileChange}
+            />
+            <input 
+              type="file" 
+              ref={cameraInputRef} 
+              className="hidden" 
+              accept="image/*"
+              capture="environment"
+              onChange={handleFileChange}
+            />
             <div className="flex justify-between items-center pl-1 pr-1">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Sua Foto</span>
               <button 
@@ -3874,22 +3896,6 @@ const HomeScreen: React.FC<{
                 ${isDragging ? 'border-purple-500 bg-purple-50 scale-[1.02]' : 'border-gray-200 bg-white hover:bg-purple-50'}
               `}
             >
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept="image/png, image/jpeg, image/webp"
-                onChange={handleFileChange}
-              />
-              <input 
-                type="file" 
-                ref={cameraInputRef} 
-                className="hidden" 
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileChange}
-              />
-              
               {isDragging && (
                 <div className="absolute inset-0 bg-purple-100/50 flex items-center justify-center z-10">
                   <p className="text-purple-700 font-bold animate-bounce">Solte a imagem aqui!</p>
@@ -4142,6 +4148,8 @@ const FinalizeScreen: React.FC<{
         </div>
 
         <div className="flex flex-col gap-2 w-full">
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg, image/webp" onChange={handleFileChange} />
+            <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileChange} />
             <div className="flex justify-between items-center pl-1 pr-1">
               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{texts.label}</span>
               <button
@@ -4156,8 +4164,6 @@ const FinalizeScreen: React.FC<{
               </button>
             </div>
              <div onClick={triggerUpload} className="border-2 border-dashed border-gray-200 bg-white rounded-2xl p-6 flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-purple-50 transition-colors group relative overflow-hidden h-48">
-                <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg, image/webp" onChange={handleFileChange} />
-                <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileChange} />
                 {clothingImage ? (
                     <>
                         <img src={clothingImage} alt="Peça selecionada" className="w-full h-full object-contain" />

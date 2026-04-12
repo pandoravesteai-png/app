@@ -67,17 +67,21 @@ async function getAccessToken() {
 }
  
 // ✅ Parâmetros otimizados para melhor qualidade
-const getParametros = () => ({
-  sampleCount: 1,
-  addWatermark: false,
-  baseSteps: 60, // Aumentado de 40 para 60 para mais detalhes e nitidez
-  personGeneration: "allow_adult",
-  safetySetting: "block_only_high",
-  outputOptions: {
-    mimeType: "image/jpeg",
-    compressionQuality: 100 // Qualidade máxima sem compressão
-  }
-});
+const getParametros = (prompt = null) => {
+  const params = {
+    sampleCount: 1,
+    addWatermark: false,
+    baseSteps: 60, // Aumentado de 40 para 60 para mais detalhes e nitidez
+    personGeneration: "allow_adult",
+    safetySetting: "block_only_high",
+    outputOptions: {
+      mimeType: "image/jpeg",
+      compressionQuality: 100 // Qualidade máxima sem compressão
+    }
+  };
+  if (prompt) params.prompt = prompt;
+  return params;
+};
  
 exports.gerarTryOn = onCall({
   memory: "2GiB",
@@ -101,7 +105,7 @@ exports.gerarTryOn = onCall({
     if (!imagemCliente) throw new HttpsError("invalid-argument", "Foto da pessoa inválida. Envie em base64.");
     if (!imagemRoupa) throw new HttpsError("invalid-argument", "Foto da roupa inválida. Envie em base64.");
  
-    const finalPrompt = customPrompt || "CRITICAL INSTRUCTION: Ultra-realistic 8k resolution photo. You MUST preserve the person's face, eyes, hair, skin tone and all facial features EXACTLY as they appear in the original photo. DO NOT blur, alter, modify or touch the face or eyes in any way. The face must be 100% identical to the original. ONLY replace the clothing item on the body with high-definition fabric textures, realistic folds, and natural shadows. The result must look like a professional studio photo of the same person wearing different clothes with sharp details.";
+    const finalPrompt = customPrompt || "Professional fashion photography, shot on 35mm lens, f/1.8, soft studio lighting, high-end commercial quality. Ultra-detailed fabric textures, realistic garment draping, natural shadows, 8k resolution, sharp focus, cinematic color grading. CRITICAL: You MUST preserve the person's face, eyes, hair, skin tone and all facial features EXACTLY as they appear in the original photo. DO NOT blur, alter, modify or touch the face or eyes in any way. The face must be 100% identical to the original.";
  
     const accessToken = await getAccessToken();
  
@@ -112,8 +116,8 @@ exports.gerarTryOn = onCall({
             personImage: { image: { bytesBase64Encoded: imagemCliente } },
             productImages: [{ image: { bytesBase64Encoded: imagemRoupa } }]
           }],
-          // ✅ Parâmetros otimizados aplicados
-          parameters: getParametros()
+          // ✅ Parâmetros otimizados aplicados com prompt profissional
+          parameters: getParametros(finalPrompt)
         };
  
         const response = await fetch(API_URL, {
@@ -180,7 +184,9 @@ exports.gerar360View = onCall({
     if (!sideImageB64 || !backImageB64 || !clothingImageB64) {
       throw new HttpsError("invalid-argument", "Imagens de Lado, Costas e Roupa são obrigatórias.");
     }
- 
+
+    const finalPrompt360 = "Professional fashion photography, studio lighting, high-end commercial quality. Ultra-detailed fabric textures, realistic garment draping, natural shadows, 8k resolution, sharp focus. CRITICAL: Preserve the person's identity and features exactly.";
+
     const accessToken = await getAccessToken();
  
     const chamarVertexAI = async (personImageB64, label, customClothingB64 = null, retryCount = 0) => {
@@ -198,8 +204,8 @@ exports.gerar360View = onCall({
               personImage: { image: { bytesBase64Encoded: pessoaLimpa } },
               productImages: [{ image: { bytesBase64Encoded: roupaLimpa } }]
             }],
-            // ✅ Mesmos parâmetros otimizados no 360
-            parameters: getParametros()
+            // ✅ Mesmos parâmetros otimizados no 360 com prompt profissional
+            parameters: getParametros(finalPrompt360)
           }),
         });
  
